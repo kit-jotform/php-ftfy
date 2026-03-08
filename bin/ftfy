@@ -1,0 +1,67 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/../vendor/autoload.php';
+
+use Ftfy\Ftfy;
+
+// Parse flags
+$explain = false;
+$file    = null;
+$args    = [];
+
+for ($i = 1; $i < $argc; $i++) {
+    match ($argv[$i]) {
+        '--explain', '-e' => $explain = true,
+        '--file',   '-f'  => $file = $argv[++$i] ?? null,
+        '--help',   '-h'  => help(),
+        default           => $args[] = $argv[$i],
+    };
+}
+
+// Get input: argument > file > stdin
+if ($args) {
+    $text = implode(' ', $args);
+} elseif ($file !== null) {
+    $text = file_get_contents($file);
+    if ($text === false) {
+        fwrite(STDERR, "ftfy: cannot read file: $file\n");
+        exit(1);
+    }
+} elseif (!posix_isatty(STDIN)) {
+    $text = stream_get_contents(STDIN);
+} else {
+    help();
+}
+
+if ($explain) {
+    [$fixed, $plan] = Ftfy::fixAndExplain($text);
+    echo $fixed . "\n";
+    if ($plan) {
+        fwrite(STDERR, "\nexplanation:\n");
+        foreach ($plan as [$operation, $param]) {
+            fwrite(STDERR, "  - $operation: $param\n");
+        }
+    }
+} else {
+    echo Ftfy::fixText($text) . "\n";
+}
+
+function help(): never
+{
+    echo <<<HELP
+    Usage:
+      ftfy [options] "text to fix"
+      ftfy [options] --file input.txt
+      echo "text" | ftfy [options]
+
+    Options:
+      -e, --explain   Print what was fixed (to stderr)
+      -f, --file      Read input from a file
+      -h, --help      Show this help
+
+    HELP;
+    exit(0);
+}

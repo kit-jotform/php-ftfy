@@ -96,6 +96,51 @@ $fixed = Ftfy::fixText($garbled, $config);
 
 Use `$config->with(fixEntities: false)` to produce a modified copy.
 
+## Command-line usage
+
+A CLI script is included at `bin/ftfy`.
+
+**Fix a string directly:**
+```bash
+php bin/ftfy "schÃ¶n"
+# schön
+```
+
+**Pipe from stdin:**
+```bash
+echo "Hello &amp; world" | php bin/ftfy
+# Hello & world
+```
+
+**Fix a file:**
+```bash
+php bin/ftfy --file input.txt
+```
+
+**Show what was fixed** (explanation goes to stderr):
+```bash
+php bin/ftfy --explain "schÃ¶n"
+# schön
+#
+# explanation:
+#   - encode: sloppy-windows-1252
+#   - decode: utf-8
+```
+
+**Install globally** (optional):
+```bash
+ln -s "$(pwd)/bin/ftfy" /usr/local/bin/ftfy
+ftfy "schÃ¶n"
+```
+
+**Options:**
+
+| Option | Short | Description |
+|---|---|---|
+| `--explain` | `-e` | Print what was fixed (to stderr) |
+| `--file` | `-f` | Read input from a file |
+| `--help` | `-h` | Show help |
+
 ## Running tests
 
 ```bash
