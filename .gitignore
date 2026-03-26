@@ -24,3 +24,6 @@ phpunit.xml.bak
 # Environment
 .env
 .env.local
+
+# Text files
+*.txt

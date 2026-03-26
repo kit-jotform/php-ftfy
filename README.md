@@ -36,7 +36,7 @@ Ftfy::fixText('IL Y MARQUÉ…');
 ## Installing
 
 ```bash
-composer require php-ftfy/ftfy
+composer require kit-jotform/php-ftfy
 ```
 
 **Requirements:** PHP >= 8.1, `ext-mbstring`, `ext-intl`

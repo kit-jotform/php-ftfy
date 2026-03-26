@@ -1,8 +1,16 @@
 {
-    "name": "php-ftfy/ftfy",
+    "name": "kit-jotform/php-ftfy",
     "description": "Fixes text for you — PHP port of the Python ftfy library",
     "type": "library",
     "license": "MIT",
+    "keywords": ["ftfy", "unicode", "encoding", "mojibake", "text", "fix"],
+    "homepage": "https://github.com/kit-jotform/php-ftfy",
+    "authors": [
+        {
+            "name": "Kemal Ilke Tuna",
+            "homepage": "https://github.com/kit-jotform"
+        }
+    ],
     "require": {
         "php": ">=8.1",
         "ext-mbstring": "*",
