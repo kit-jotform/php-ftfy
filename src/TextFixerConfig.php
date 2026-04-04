@@ -7,17 +7,11 @@ namespace Ftfy;
 /**
  * Configuration options for ftfy text fixing.
  *
- * All options can be passed as constructor arguments. Unspecified options
- * keep their defaults.
+ * @param string|bool $unescapeHtml  "auto" = unescape unless a literal '<' is found,
+ *                                   true = always unescape, false = never.
  */
 final class TextFixerConfig
 {
-    /**
-     * @param string|bool $unescapeHtml
-     *   "auto" = unescape unless a literal '<' is found (likely real HTML),
-     *   true  = always unescape,
-     *   false = never unescape.
-     */
     public function __construct(
         public readonly string|bool $unescapeHtml = 'auto',
         public readonly bool $removeTerminalEscapes = true,

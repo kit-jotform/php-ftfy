@@ -6,18 +6,9 @@ namespace Ftfy;
 
 use Ftfy\Codecs\SloppyCodecs;
 
-/**
- * Individual text-fixing functions. Port of ftfy/fixes.py.
- *
- * All functions accept and return UTF-8 strings, except where raw bytes
- * are explicitly noted.
- */
+/** Individual text-fixing functions. Port of ftfy/fixes.py. */
 final class Fixes
 {
-    // -------------------------------------------------------------------------
-    // HTML unescaping
-    // -------------------------------------------------------------------------
-
     public static function unescapeHtml(string $text): string
     {
         $entities = CharData::getHtmlEntities();
@@ -27,15 +18,12 @@ final class Fixes
             static function (array $m) use ($entities): string {
                 $entity = $m[0];
 
-                // Named entity lookup (includes uppercase variants)
                 if (isset($entities[$entity])) {
                     return $entities[$entity];
                 }
 
-                // Numeric entities: &#NNN; or &#xHHH;
                 if (str_starts_with($entity, '&#')) {
                     $decoded = html_entity_decode($entity, ENT_HTML5 | ENT_QUOTES, 'UTF-8');
-                    // If the semicolon was consumed (i.e. entity was fully decoded)
                     if (!str_contains($decoded, ';')) {
                         return $decoded;
                     }
@@ -47,18 +35,10 @@ final class Fixes
         ) ?? $text;
     }
 
-    // -------------------------------------------------------------------------
-    // Terminal escapes
-    // -------------------------------------------------------------------------
-
     public static function removeTerminalEscapes(string $text): string
     {
         return preg_replace('/\033\[((?:\d|;)*)([a-zA-Z])/', '', $text) ?? $text;
     }
-
-    // -------------------------------------------------------------------------
-    // Quote normalisation
-    // -------------------------------------------------------------------------
 
     public static function uncurlQuotes(string $text): string
     {
@@ -66,10 +46,6 @@ final class Fixes
         $text = preg_replace(CharData::DOUBLE_QUOTE_RE, '"', $text) ?? $text;
         return $text;
     }
-
-    // -------------------------------------------------------------------------
-    // Latin ligatures
-    // -------------------------------------------------------------------------
 
     public static function fixLatinLigatures(string $text): string
     {
@@ -84,10 +60,6 @@ final class Fixes
         ) ?? $text;
     }
 
-    // -------------------------------------------------------------------------
-    // Character width
-    // -------------------------------------------------------------------------
-
     public static function fixCharacterWidth(string $text): string
     {
         $widthMap = CharData::getWidthMap();
@@ -101,14 +73,9 @@ final class Fixes
         ) ?? $text;
     }
 
-    // -------------------------------------------------------------------------
-    // Line breaks
-    // -------------------------------------------------------------------------
-
     public static function fixLineBreaks(string $text): string
     {
-        // Normalize CRLF to LF first, then collapse all other line-ending
-        // variants in a single pass.
+        // Normalize CRLF first so \r\n doesn't leave a stray \r.
         $text = str_replace("\r\n", "\n", $text);
         return str_replace(
             ["\r", "\u{2028}", "\u{2029}", "\u{0085}"],
@@ -117,28 +84,19 @@ final class Fixes
         );
     }
 
-    // -------------------------------------------------------------------------
-    // Surrogate pairs
-    // -------------------------------------------------------------------------
-
     public static function fixSurrogates(string $text): string
     {
-        // Scan for surrogate sequences encoded as CESU-8 bytes.
-        // PCRE /u mode rejects surrogates, so we work at the byte level.
-        // ED [A0-AF] xx  = high surrogate
-        // ED [B0-BF] xx  = low surrogate
+        // PCRE /u rejects surrogates, so decode CESU-8 at the byte level.
+        // ED [A0-AF] xx = high surrogate, ED [B0-BF] xx = low surrogate.
         if (!str_contains($text, "\xED")) {
             return $text;
         }
 
-        // Convert via CESU-8 decoder on the raw bytes.
-        // In PHP, a string that contains surrogates as UTF-8 bytes (CESU-8) will
-        // have the bytes \xED\xA0...\xED\xB0... We detect and convert these.
-        $bytes = $text; // already raw bytes in PHP
+        $bytes = $text;
         $chunks = [];
         $len = strlen($bytes);
         $i = 0;
-        $copyFrom = 0; // start of the next verbatim run
+        $copyFrom = 0;
         while ($i < $len) {
             if (ord($bytes[$i]) !== 0xED) {
                 $i++;
@@ -157,14 +115,13 @@ final class Fixes
                 }
                 $high = 0xD000 | ((ord($bytes[$i + 1]) & 0x3F) << 6) | (ord($bytes[$i + 2]) & 0x3F);
                 $low  = 0xD000 | ((ord($bytes[$i + 4]) & 0x3F) << 6) | (ord($bytes[$i + 5]) & 0x3F);
-                // $high ∈ D800-DBFF, $low ∈ DC00-DFFF
                 $cp = 0x10000 + (($high - 0xD800) << 10) + ($low - 0xDC00);
                 $chunks[] = mb_chr($cp, 'UTF-8');
                 $i += 6;
                 $copyFrom = $i;
                 continue;
             }
-            // Isolated high surrogate: ED [A0-AF] xx
+            // Isolated surrogate (high or low) → replacement character
             if (
                 $i + 2 < $len
                 && (ord($bytes[$i + 1]) & 0xE0) === 0xA0
@@ -178,7 +135,6 @@ final class Fixes
                 $copyFrom = $i;
                 continue;
             }
-            // Isolated low surrogate: ED [B0-BF] xx
             if (
                 $i + 2 < $len
                 && (ord($bytes[$i + 1]) & 0xE0) === 0xB0
@@ -194,7 +150,6 @@ final class Fixes
             }
             $i++;
         }
-        // Append any remaining verbatim bytes.
         if ($copyFrom < $len) {
             $chunks[] = substr($bytes, $copyFrom);
         }
@@ -202,15 +157,10 @@ final class Fixes
         return implode('', $chunks);
     }
 
-    // -------------------------------------------------------------------------
-    // Control character removal
-    // -------------------------------------------------------------------------
-
     public static function removeControlChars(string $text): string
     {
         $codepoints = CharData::CONTROL_CHAR_CODEPOINTS;
 
-        // Build a regex from the codepoint list (cached).
         static $pattern = null;
         if ($pattern === null) {
             $parts = [];
@@ -223,28 +173,19 @@ final class Fixes
         return preg_replace($pattern, '', $text) ?? $text;
     }
 
-    // -------------------------------------------------------------------------
-    // Restore byte 0xA0 (operates on raw bytes)
-    // -------------------------------------------------------------------------
-
     /**
-     * In a bytes string, restore 0x20 (space) to 0xA0 (no-break space) where
-     * it would complete a valid UTF-8 sequence. Mirrors fixes.restore_byte_a0.
-     *
-     * @param string $bytes Raw binary string
-     * @return string Raw binary string
+     * In a raw byte string, restore 0x20 (space) to 0xA0 (no-break space)
+     * where it completes a valid UTF-8 sequence. Mirrors fixes.restore_byte_a0.
      */
     public static function restoreByteA0(string $bytes): string
     {
-        // Handle the "à word" exception: C3 followed by single space before
-        // a non-contraction word.
+        // "à word" exception: C3 followed by a space before a non-contraction word.
         $bytes = preg_replace_callback(
             '/\xC3 (?! |quele|quela|quilo|s )/',
             static fn() => "\xC3\xA0 ",
             $bytes
         ) ?? $bytes;
 
-        // Replace space with 0xA0 inside ALTERED_UTF8_RE matches.
         $bytes = preg_replace_callback(
             CharData::ALTERED_UTF8_RE,
             static function (array $m): string {
@@ -256,25 +197,11 @@ final class Fixes
         return $bytes;
     }
 
-    // -------------------------------------------------------------------------
-    // Replace lossy sequences (operates on raw bytes)
-    // -------------------------------------------------------------------------
-
-    /**
-     * Replace LOSSY_UTF8_RE matches with the UTF-8 encoding of U+FFFD.
-     *
-     * @param string $bytes Raw binary string
-     * @return string Raw binary string
-     */
+    /** Replace LOSSY_UTF8_RE matches with U+FFFD (raw bytes in, raw bytes out). */
     public static function replaceLossySequences(string $bytes): string
     {
-        $replacement = "\xEF\xBF\xBD"; // UTF-8 for U+FFFD
-        return preg_replace(CharData::LOSSY_UTF8_RE, $replacement, $bytes) ?? $bytes;
+        return preg_replace(CharData::LOSSY_UTF8_RE, "\xEF\xBF\xBD", $bytes) ?? $bytes;
     }
-
-    // -------------------------------------------------------------------------
-    // Decode inconsistent UTF-8
-    // -------------------------------------------------------------------------
 
     public static function decodeInconsistentUtf8(string $text): string
     {
@@ -284,9 +211,8 @@ final class Fixes
             $detectorRegex,
             static function (array $m) use ($textLen): string {
                 $substr = $m[0];
-                // Only recurse into fixEncoding when the match is strictly
-                // shorter than the whole input — prevents infinite recursion
-                // when the entire text keeps matching the detector regex.
+                // Guard against infinite recursion: only recurse when the match
+                // is strictly shorter than the full input.
                 if (strlen($substr) < $textLen && Badness::isBad($substr)) {
                     return Ftfy::fixEncoding($substr);
                 }
@@ -296,16 +222,11 @@ final class Fixes
         ) ?? $text;
     }
 
-    // -------------------------------------------------------------------------
-    // Fix C1 controls
-    // -------------------------------------------------------------------------
-
-    /** @var array<string,string>|null Cached C1 → Windows-1252 replacement map */
+    /** @var array<string,string>|null */
     private static ?array $c1Map = null;
 
     public static function fixC1Controls(string $text): string
     {
-        // Pre-compute the 32 C1 control → Windows-1252 mappings once.
         if (self::$c1Map === null) {
             self::$c1Map = [];
             for ($byte = 0x80; $byte <= 0x9F; $byte++) {
@@ -316,10 +237,6 @@ final class Fixes
 
         return strtr($text, self::$c1Map);
     }
-
-    // -------------------------------------------------------------------------
-    // BOM removal
-    // -------------------------------------------------------------------------
 
     public static function removeBom(string $text): string
     {

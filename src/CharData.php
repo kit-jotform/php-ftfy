@@ -4,13 +4,10 @@ declare(strict_types=1);
 
 namespace Ftfy;
 
-/**
- * Character data: regex patterns, HTML entity tables, and character maps used
- * by the various fixers. This is a direct port of ftfy/chardata.py.
- */
+/** Character data: regex patterns, entity tables, and character maps. Port of ftfy/chardata.py. */
 final class CharData
 {
-    // Encodings tried (in order) when looking for mojibake fixes.
+    /** Encodings tried (in order) when looking for mojibake fixes. */
     public const CHARMAP_ENCODINGS = [
         'latin-1',
         'sloppy-windows-1252',
@@ -24,35 +21,21 @@ final class CharData
         'cp437',
     ];
 
-    // -------------------------------------------------------------------------
-    // Regex patterns
-    // -------------------------------------------------------------------------
-
-    /**
-     * Matches single curly-quote characters that should become straight quotes.
-     * U+02BC MODIFIER LETTER APOSTROPHE, U+2018-U+201B
-     */
+    /** Matches single curly-quote characters: U+02BC, U+2018-U+201B. */
     public const SINGLE_QUOTE_RE = '/[\x{02BC}\x{2018}-\x{201B}]/u';
 
-    /**
-     * Matches double curly-quote characters. U+201C-U+201F
-     */
+    /** Matches double curly-quote characters: U+201C-U+201F. */
     public const DOUBLE_QUOTE_RE = '/[\x{201C}-\x{201F}]/u';
 
-    /**
-     * Matches HTML entity references (numeric and named) ending in semicolons.
-     */
+    /** Matches HTML entity references (numeric and named) ending in semicolons. */
     public const HTML_ENTITY_RE = '/&#?[0-9A-Za-z]{1,24};/u';
 
-    /**
-     * Matches C1 control characters U+0080–U+009F still present in a string.
-     */
+    /** Matches C1 control characters U+0080-U+009F. */
     public const C1_CONTROL_RE = '/[\x{0080}-\x{009F}]/u';
 
     /**
-     * Matches UTF-8 sequences in a byte string where 0x20 (space) appears
+     * Matches UTF-8 sequences in a raw byte string where 0x20 (space) appears
      * where 0xA0 (no-break space) would complete a valid UTF-8 sequence.
-     * Applied to raw binary strings (not UTF-8).
      */
     public const ALTERED_UTF8_RE =
         '/[\xC2\xC3\xC5\xCE\xD0\xD9][ ]'
@@ -64,9 +47,8 @@ final class CharData
         . '/';
 
     /**
-     * Matches UTF-8 / CESU-8 sequences where continuation bytes have been
-     * replaced by 0x1A (the SUBSTITUTE character used by sloppy codecs) or
-     * by '?'. Applied to raw binary strings.
+     * Matches UTF-8/CESU-8 sequences where continuation bytes were replaced by
+     * 0x1A (sloppy codec substitute) or '?'. Applied to raw binary strings.
      */
     public const LOSSY_UTF8_RE =
         '/[\xC2-\xDF][\x1A]'
@@ -81,13 +63,8 @@ final class CharData
         . '|\x1A'
         . '/';
 
-    // -------------------------------------------------------------------------
-    // Character maps
-    // -------------------------------------------------------------------------
-
     /**
      * Latin typographic ligatures and digraphs mapped to their component letters.
-     * Keys are Unicode codepoints; values are replacement strings.
      *
      * @var array<int,string>
      */
@@ -108,41 +85,24 @@ final class CharData
         0xFB06 => 'st',
     ];
 
-    /**
-     * Control characters that should be removed (mapped to null / removed).
-     * These are codepoints we strip in remove_control_chars.
-     *
-     * @var int[]
-     */
+    /** @var int[] */
     public const CONTROL_CHAR_CODEPOINTS = [
-        // U+0000–U+0008
         0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-        // U+000B
         0x0B,
-        // U+000E–U+001F
         0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15,
         0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
-        // U+007F DEL
         0x7F,
-        // U+206A–U+206F Deprecated Arabic formatting
         0x206A, 0x206B, 0x206C, 0x206D, 0x206E, 0x206F,
-        // U+FEFF BOM
         0xFEFF,
-        // U+FFF9–U+FFFB Interlinear annotation
         0xFFF9, 0xFFFA, 0xFFFB,
-        // U+FFFC Object Replacement Character
         0xFFFC,
     ];
-
-    // -------------------------------------------------------------------------
-    // HTML entities
-    // -------------------------------------------------------------------------
 
     /** @var array<string,string>|null */
     private static ?array $htmlEntities = null;
 
     /**
-     * Return the HTML entity → character map used by unescape_html.
+     * Return the HTML entity → character map used by unescapeHtml.
      * Includes a limited set of uppercase-name entities (e.g. &EACUTE;).
      *
      * @return array<string,string>
@@ -159,20 +119,15 @@ final class CharData
 
     private static function buildHtmlEntities(): array
     {
-        // PHP's html_entity_decode / get_html_translation_table doesn't expose
-        // the full HTML5 entity list, so we embed the commonly needed ones
-        // and supplement with PHP's built-in table.
         $entities = [];
 
-        // Pull from PHP's HTML5 translation table (a subset of html5 entities).
+        // PHP's get_html_translation_table covers a subset of HTML5 entities.
         $table = get_html_translation_table(HTML_ENTITIES, ENT_HTML5 | ENT_QUOTES, 'UTF-8');
         foreach ($table as $char => $entity) {
-            // $table maps char→entity; we want entity→char
             $entities[$entity] = $char;
         }
 
-        // Supplement with the extended HTML5 entity list using html_entity_decode.
-        // We probe a curated list of named entities that appear in real-world text.
+        // Supplement with commonly needed named entities not in PHP's built-in table.
         $namedEntities = [
             '&hellip;'  => '…',  '&mdash;'   => '—',  '&ndash;'  => '–',
             '&lsquo;'   => "\u{2018}", '&rsquo;' => "\u{2019}",
@@ -193,7 +148,6 @@ final class CharData
             '&scaron;'  => 'š',  '&Yuml;'    => 'Ÿ',
             '&macr;'    => '¯',  '&checkmark;' => '✓',
             '&Jscr;'    => "\u{1D4A5}", '&HilbertSpace;' => "\u{210B}",
-            // Greek
             '&Alpha;'   => 'Α',  '&Beta;'    => 'Β',  '&Gamma;'  => 'Γ',
             '&Delta;'   => 'Δ',  '&Epsilon;' => 'Ε',  '&Zeta;'   => 'Ζ',
             '&Eta;'     => 'Η',  '&Theta;'   => 'Θ',  '&Iota;'   => 'Ι',
@@ -216,14 +170,12 @@ final class CharData
             $entities[$entity] = $char;
         }
 
-        // Add uppercase variants for latin + common symbol entities (as Python does).
+        // Add uppercase variants for all-lowercase entity names (as Python does).
         $uppercaseAble = [];
         foreach ($entities as $entity => $char) {
-            // Only consider entities that are all-lowercase after the &
-            $name = substr($entity, 1, -1); // strip & and ;
+            $name = substr($entity, 1, -1);
             if ($name === strtolower($name) && strlen($name) >= 2) {
                 $upper = '&' . strtoupper($name) . ';';
-                // Only add if PHP's html_entity_decode wouldn't already handle it.
                 if (!isset($entities[$upper])) {
                     $upperChar = mb_strtoupper($char, 'UTF-8');
                     if ($upperChar !== $char) {
@@ -239,66 +191,53 @@ final class CharData
         return $entities;
     }
 
-    // -------------------------------------------------------------------------
-    // UTF-8 detector regex (for decode_inconsistent_utf8)
-    // -------------------------------------------------------------------------
-
-    /**
-     * Regex that matches sequences of characters that look like UTF-8 mojibake
-     * embedded in otherwise-correct text.
-     *
-     * This is the PHP equivalent of chardata.UTF8_DETECTOR_RE.
-     */
     /** @var string|null */
     private static ?string $utf8DetectorRegex = null;
 
+    /**
+     * Regex matching sequences that look like UTF-8 mojibake embedded in
+     * otherwise-correct text. PHP equivalent of chardata.UTF8_DETECTOR_RE.
+     */
     public static function getUtf8DetectorRegex(): string
     {
         if (self::$utf8DetectorRegex !== null) {
             return self::$utf8DetectorRegex;
         }
 
-        // Character classes from UTF8_CLUES in chardata.py, expressed as
-        // PCRE Unicode escapes.
+        // Character classes from UTF8_CLUES in chardata.py.
 
-        // Letters that decode to 0xC2-0xDF in Latin-1-like encodings (first byte of 2-byte UTF-8)
+        // Characters that decode to 0xC2-0xDF in Latin-1-like encodings (first byte of 2-byte UTF-8)
         $first2 =
-            '\x{00C2}\x{00C3}\x{00C5}\x{00CE}\x{00D0}\x{00D9}'   // common Latin subsets
-            . '\x{00C0}-\x{00D9}'      // Latin-1 upper accented (C0-D9, the main range)
-            . '\x{0102}\x{0100}\x{0106}\x{010C}\x{010E}\x{0110}'  // windows-1250 specific
+            '\x{00C2}\x{00C3}\x{00C5}\x{00CE}\x{00D0}\x{00D9}'
+            . '\x{00C0}-\x{00D9}'
+            . '\x{0102}\x{0100}\x{0106}\x{010C}\x{010E}\x{0110}'
             . '\x{0118}\x{011A}\x{012A}\x{0141}\x{0143}\x{0147}'
             . '\x{0154}\x{015A}\x{015E}\x{0160}\x{0164}\x{0166}'
             . '\x{016E}\x{0170}\x{0179}\x{017B}\x{017D}'
-            // Greek (windows-1253 C2-DF range)
             . '\x{0392}-\x{03A9}\x{03AA}\x{03AB}\x{03AC}-\x{03AF}'
-            // Cyrillic (windows-1251 C2-DF range)
             . '\x{0412}-\x{042F}';
 
-        // Letters that decode to 0xE0-0xEF (first byte of 3-byte UTF-8)
+        // Characters that decode to 0xE0-0xEF (first byte of 3-byte UTF-8)
         $first3 =
-            '\x{00E0}-\x{00EF}'        // Latin-1 lower accented
+            '\x{00E0}-\x{00EF}'
             . '\x{0103}\x{0101}\x{0107}\x{010D}\x{010F}\x{0111}'
             . '\x{0119}\x{011B}\x{012B}\x{013C}\x{013A}\x{0142}'
             . '\x{0144}\x{0148}\x{0155}\x{015B}\x{015F}\x{0161}'
             . '\x{0165}\x{017A}\x{017C}\x{017E}\x{0219}\x{021B}'
-            // Greek small (windows-1253 E0-EF)
             . '\x{03B0}-\x{03BF}'
-            // Cyrillic small (windows-1251 E0-EF)
             . '\x{0430}-\x{043F}';
 
-        // Letters that decode to 0xF0 or 0xF3 (first byte of 4-byte UTF-8)
+        // Characters that decode to 0xF0 or 0xF3 (first byte of 4-byte UTF-8)
         $first4 =
-            '\x{00F0}\x{00F3}'         // Latin-1 ð ó
-            . '\x{0111}\x{011F}\x{015B}'  // d-stroke, g-breve, s-caron
-            . '\x{03C0}\x{03C3}'       // Greek pi, sigma
-            . '\x{0440}\x{0443}';      // Cyrillic er, u
+            '\x{00F0}\x{00F3}'
+            . '\x{0111}\x{011F}\x{015B}'
+            . '\x{03C0}\x{03C3}'
+            . '\x{0440}\x{0443}';
 
-        // Continuation byte stand-ins (0x80-0xBF in Latin-1-like encodings + space)
+        // Continuation byte stand-ins (0x80-0xBF range in Latin-1-like encodings, plus space)
         $cont =
-            '\x{0080}-\x{00BF}'        // direct C1 / Latin-1 upper range
-            . '\x{0020}'               // space standing in for 0xA0
-            // A selection of characters from various windows encodings
-            // that appear in the 0x80-0xBF byte positions
+            '\x{0080}-\x{00BF}'
+            . '\x{0020}'
             . '\x{0104}\x{00C6}\x{0139}\x{0141}\x{00D8}\x{0342}\x{0343}'
             . '\x{0145}\x{013B}\x{015A}\x{0160}\x{015C}\x{0166}\x{0178}'
             . '\x{017B}\x{017D}\x{0179}\x{0152}\x{0105}\x{00E6}'
@@ -312,7 +251,7 @@ final class CharData
             . '\x{201C}\x{201D}\x{201E}\x{2020}\x{2021}\x{2022}'
             . '\x{2026}\x{2030}\x{2039}\x{203A}\x{20AC}\x{2116}\x{2122}';
 
-        // The lookbehind uses a stricter continuation set (no spaces/dashes/quotes).
+        // Stricter continuation set for the lookbehind (no spaces/dashes/quotes).
         $contStrict =
             '\x{0080}-\x{00BF}'
             . '\x{0104}\x{00C6}\x{0139}\x{0141}\x{00D8}\x{0145}\x{013B}'
@@ -337,16 +276,12 @@ final class CharData
         return self::$utf8DetectorRegex;
     }
 
-    // -------------------------------------------------------------------------
-    // Width map (fullwidth/halfwidth → standard)
-    // -------------------------------------------------------------------------
-
     /** @var array<int,string>|null */
     private static ?array $widthMap = null;
 
     /**
-     * Returns a map of [codepoint => replacement_string] for fullwidth/halfwidth
-     * characters. Also includes U+3000 (ideographic space) → U+0020.
+     * Map of codepoint → replacement string for fullwidth/halfwidth characters.
+     * Also includes U+3000 (ideographic space) → U+0020.
      *
      * @return array<int,string>
      */
@@ -363,18 +298,8 @@ final class CharData
             $map[$i] = mb_chr($i - 0xFF01 + 0x21, 'UTF-8');
         }
 
-        // Halfwidth Katakana: U+FF65-U+FF9F → fullwidth Katakana equivalents.
-        // We use PHP's Normalizer (NFKC) to compute these.
-        for ($i = 0xFF65; $i <= 0xFF9F; $i++) {
-            $char = mb_chr($i, 'UTF-8');
-            $norm = \Normalizer::normalize($char, \Normalizer::FORM_KC);
-            if ($norm !== false && $norm !== $char) {
-                $map[$i] = $norm;
-            }
-        }
-
-        // Halfwidth Hangul filler etc.
-        for ($i = 0xFFA0; $i <= 0xFFEF; $i++) {
+        // Halfwidth Katakana and Hangul: use NFKC to compute equivalents.
+        for ($i = 0xFF65; $i <= 0xFFEF; $i++) {
             $char = mb_chr($i, 'UTF-8');
             $norm = \Normalizer::normalize($char, \Normalizer::FORM_KC);
             if ($norm !== false && $norm !== $char) {

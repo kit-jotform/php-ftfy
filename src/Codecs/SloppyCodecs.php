@@ -8,14 +8,12 @@ namespace Ftfy\Codecs;
  * "Sloppy" single-byte encodings that fill unmapped bytes with their Latin-1
  * equivalents (same as what HTML5 browsers do).
  *
- * The decode tables below were generated from Python's codec data:
- * for each encoding, bytes 0x80-0xFF are listed where they differ from Latin-1.
- * Byte 0x1A is always mapped to U+FFFD (replacement character) for ftfy's use.
+ * Decode tables list bytes 0x80-0xFF that differ from Latin-1.
+ * Byte 0x1A is always mapped to U+FFFD (used by ftfy for lossy sequences).
  */
 final class SloppyCodecs
 {
-    // Diff tables: [byte => unicode codepoint] for bytes 0x80-0xFF that differ from Latin-1.
-    // Byte 0x1A => 0xFFFD is applied on top of each table.
+    // [byte => unicode codepoint] for bytes 0x80-0xFF that differ from Latin-1.
     private const DIFF_TABLES = [
         'windows-1250' => [
             128 => 8364, 130 => 8218, 132 => 8222, 133 => 8230, 134 => 8224,
@@ -115,21 +113,20 @@ final class SloppyCodecs
         ],
     ];
 
-    /** @var array<string, string[]> Runtime decode tables (byte index → UTF-8 char) */
+    /** @var array<string, string[]> */
     private static array $decodeTables = [];
 
-    /** @var array<string, string> Runtime strtr maps for decode (byte→UTF-8 string) */
+    /** @var array<string, string> */
     private static array $strtrDecodeMaps = [];
 
-    /** @var array<string, array<int,int>> Runtime encode tables (codepoint → byte) */
+    /** @var array<string, array<int,int>> */
     private static array $encodeTables = [];
 
-    /** @var array<string, string> Runtime strtr maps for encode (UTF-8 char→byte) */
+    /** @var array<string, string> */
     private static array $strtrEncodeMaps = [];
 
     /**
-     * Return the full 256-entry decode table for an encoding as an array of
-     * UTF-8 strings indexed by byte value.
+     * Return the full 256-entry decode table for an encoding (byte value → UTF-8 string).
      *
      * @return string[]
      */
@@ -140,16 +137,14 @@ final class SloppyCodecs
             return self::$decodeTables[$key];
         }
 
-        // Start with Latin-1 identity mapping (codepoint == byte value for 0x80-0xFF).
+        // Start with Latin-1 identity mapping (codepoint == byte value).
         $table = [];
         for ($i = 0; $i < 256; $i++) {
             $table[$i] = mb_chr($i, 'UTF-8');
         }
 
-        // Byte 0x1A always maps to U+FFFD.
         $table[0x1A] = "\u{FFFD}";
 
-        // Apply encoding-specific overrides.
         $baseKey = self::resolveBase($key);
         if ($baseKey !== null && isset(self::DIFF_TABLES[$baseKey])) {
             foreach (self::DIFF_TABLES[$baseKey] as $byte => $codepoint) {
@@ -161,17 +156,11 @@ final class SloppyCodecs
         return $table;
     }
 
-    /**
-     * Decode a raw binary string using a sloppy single-byte encoding.
-     */
     public static function decode(string $bytes, string $encoding): string
     {
         $key = self::normalise($encoding);
         if (!isset(self::$strtrDecodeMaps[$key])) {
             $table = self::getDecodeTable($encoding);
-            // Build a byte→string translation map for strtr().
-            // Only include bytes whose decoded form differs from their Latin-1
-            // identity (i.e. the byte itself as a UTF-8 code unit).
             $map = [];
             for ($b = 0; $b < 256; $b++) {
                 $from = chr($b);
@@ -187,8 +176,8 @@ final class SloppyCodecs
     }
 
     /**
-     * Encode a UTF-8 string to raw bytes using a sloppy single-byte encoding.
-     * Characters that cannot be encoded are silently dropped (like //IGNORE).
+     * Encode a UTF-8 string to raw bytes. Characters that cannot be encoded
+     * are silently dropped (like //IGNORE).
      */
     public static function encode(string $utf8, string $encoding): string
     {
@@ -198,21 +187,19 @@ final class SloppyCodecs
             $enc = [];
             foreach ($decodeTable as $byte => $char) {
                 $cp = mb_ord($char, 'UTF-8');
-                // Last write wins — consistent with Python's charmap_build
-                $enc[$cp] = $byte;
+                $enc[$cp] = $byte; // last write wins, consistent with Python's charmap_build
             }
             self::$encodeTables[$key] = $enc;
         }
         $encTable = self::$encodeTables[$key];
 
-        // Iterate at the byte level to avoid mb_str_split + mb_ord overhead.
         $len = strlen($utf8);
         $chunks = [];
         $i = 0;
         while ($i < $len) {
             $b = ord($utf8[$i]);
             if ($b < 0x80) {
-                // ASCII: find the end of the ASCII run and copy in bulk.
+                // Bulk-copy ASCII runs.
                 $start = $i;
                 $i++;
                 while ($i < $len && ord($utf8[$i]) < 0x80) {
@@ -221,7 +208,6 @@ final class SloppyCodecs
                 $chunks[] = substr($utf8, $start, $i - $start);
                 continue;
             }
-            // Decode UTF-8 lead byte to get codepoint and sequence length.
             if (($b & 0xE0) === 0xC0) {
                 $cp = $b & 0x1F;
                 $seqLen = 2;
@@ -233,7 +219,7 @@ final class SloppyCodecs
                 $seqLen = 4;
             } else {
                 $i++;
-                continue; // invalid lead byte, skip
+                continue; // invalid lead byte
             }
             for ($j = 1; $j < $seqLen && $i + $j < $len; $j++) {
                 $cp = ($cp << 6) | (ord($utf8[$i + $j]) & 0x3F);
@@ -249,7 +235,7 @@ final class SloppyCodecs
 
     /**
      * Check whether a UTF-8 string can be represented in the given encoding.
-     * This mirrors Python's `possible_encoding(text, encoding)`.
+     * Mirrors Python's possible_encoding(text, encoding).
      */
     public static function possibleEncoding(string $utf8, string $encoding): bool
     {
@@ -263,20 +249,15 @@ final class SloppyCodecs
             return false;
         }
 
-        // Build a regex matching every character that can appear in this encoding.
-        // We cache this per encoding.
         static $regexCache = [];
         if (!isset($regexCache[$key])) {
             $decodeTable = self::getDecodeTable($encoding);
             $chars = array_unique(array_values($decodeTable));
-            $pattern = self::buildCharsetRegex($chars);
-            $regexCache[$key] = $pattern;
+            $regexCache[$key] = self::buildCharsetRegex($chars);
         }
 
         return (bool) preg_match($regexCache[$key], $utf8);
     }
-
-    // -------------------------------------------------------------------------
 
     private static function normalise(string $encoding): string
     {
@@ -285,14 +266,12 @@ final class SloppyCodecs
 
     private static function resolveBase(string $normKey): ?string
     {
-        // Accept both "sloppy_windows_1252" and "windows_1252" keys.
+        // Accept both "sloppy_windows_1252" and "windows_1252".
         $stripped = preg_replace('/^sloppy_/', '', $normKey) ?? $normKey;
-        // Re-hyphenate for our table keys.
         $hyphen = str_replace('_', '-', $stripped);
         if (isset(self::DIFF_TABLES[$hyphen])) {
             return $hyphen;
         }
-        // Also accept iso_8859_X → iso-8859-X
         $isoHyphen = preg_replace('/iso_8859_(\d+)/', 'iso-8859-$1', $hyphen) ?? $hyphen;
         if (isset(self::DIFF_TABLES[$isoHyphen])) {
             return $isoHyphen;
@@ -300,19 +279,13 @@ final class SloppyCodecs
         return null;
     }
 
-    /**
-     * Build a PCRE character class pattern that matches exactly the given chars.
-     *
-     * @param string[] $chars
-     */
+    /** @param string[] $chars */
     private static function buildCharsetRegex(array $chars): string
     {
         $codepoints = array_map(fn(string $c) => mb_ord($c, 'UTF-8'), $chars);
         sort($codepoints);
 
-        // Also include ASCII 0x00-0x7F (always encodable in any single-byte enc)
         $pieces = ['\x00-\x7f'];
-
         foreach ($codepoints as $cp) {
             if ($cp >= 0x80) {
                 $pieces[] = sprintf('\x{%04X}', $cp);

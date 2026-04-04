@@ -7,26 +7,15 @@ namespace Ftfy;
 use Ftfy\Codecs\SloppyCodecs;
 use Ftfy\Codecs\Utf8Variants;
 
-/**
- * Main entry point for ftfy. Port of ftfy/__init__.py.
- *
- * Primary public API:
- *   Ftfy::fixText(string $text, ?TextFixerConfig $config): string
- *   Ftfy::fixEncoding(string $text, ?TextFixerConfig $config): string
- *   Ftfy::fixAndExplain(string $text, ?TextFixerConfig $config): array{string, ?array}
- */
+/** Main entry point. Port of ftfy/__init__.py. */
 final class Ftfy
 {
     public const VERSION = '6.3.1-php';
 
-    // -------------------------------------------------------------------------
-    // Public API
-    // -------------------------------------------------------------------------
-
     /**
      * Fix Unicode problems in text, returning the corrected string.
      *
-     * Text is processed in line-length segments (split on "\n") to bound
+     * Processes text in line-length segments (split on "\n") to bound
      * worst-case runtime, exactly as the Python version does.
      */
     public static function fixText(string $text, ?TextFixerConfig $config = null): string
@@ -35,8 +24,7 @@ final class Ftfy
         $config = $config->with(explain: false);
 
         // "\n" is a single byte in UTF-8, so byte-level strpos/substr is safe
-        // for splitting on newlines and dramatically faster than mb_strpos on
-        // large inputs.
+        // and much faster than mb_strpos on large inputs.
         $out = [];
         $pos = 0;
         $len = strlen($text);
@@ -45,11 +33,9 @@ final class Ftfy
             $nlPos = strpos($text, "\n", $pos);
             $textbreak = ($nlPos === false) ? $len : $nlPos + 1;
 
-            // maxDecodeLength is a character count — for the bounding check we
-            // need mb_substr to cut at a character boundary.  But in the common
-            // case the segment is short enough and we can use fast substr.
+            // maxDecodeLength is a character count; use mb_substr in the rare
+            // case a segment might exceed it (worst-case 4 bytes per char).
             if (($textbreak - $pos) > $config->maxDecodeLength * 4) {
-                // Certainly over the limit (worst-case 4 bytes per character).
                 $segment = mb_substr($text, mb_strlen(substr($text, 0, $pos), 'UTF-8'), $config->maxDecodeLength, 'UTF-8');
                 $pos += strlen($segment);
             } else {
@@ -99,10 +85,8 @@ final class Ftfy
         while (true) {
             $origText = $text;
 
-            // 1. HTML entities
             $text = self::tryFix('unescapeHtml', $text, $config, $steps);
 
-            // 2. Encoding fix (mojibake)
             if ($config->fixEncoding) {
                 if ($steps === null) {
                     $text = self::fixEncoding($text, $config);
@@ -116,7 +100,6 @@ final class Ftfy
                 }
             }
 
-            // 3. Character-level fixers
             foreach (
                 [
                     'fixC1Controls',
@@ -132,7 +115,6 @@ final class Ftfy
                 $text = self::tryFix($fixer, $text, $config, $steps);
             }
 
-            // 4. Unicode normalisation
             if ($normConst !== null) {
                 $normalised = \Normalizer::normalize($text, $normConst);
                 if ($normalised !== false && $normalised !== $text) {
@@ -177,9 +159,6 @@ final class Ftfy
         }
     }
 
-    /**
-     * Fix encoding only, discarding the explanation.
-     */
     public static function fixEncoding(string $text, ?TextFixerConfig $config = null): string
     {
         $config ??= new TextFixerConfig(explain: false);
@@ -196,284 +175,6 @@ final class Ftfy
             }
         }
     }
-
-    // -------------------------------------------------------------------------
-    // Internal helpers
-    // -------------------------------------------------------------------------
-
-    /**
-     * Apply a named fixer if enabled in config.
-     *
-     * @param list<array{string,string}>|null $steps
-     */
-    private static function tryFix(
-        string $fixerName,
-        string $text,
-        TextFixerConfig $config,
-        ?array &$steps
-    ): string {
-        // Map fixer names to config property names and Fixes methods.
-        static $configMap = [
-            'unescapeHtml'          => 'unescapeHtml',
-            'removeTerminalEscapes' => 'removeTerminalEscapes',
-            'fixC1Controls'         => 'fixC1Controls',
-            'fixLatinLigatures'     => 'fixLatinLigatures',
-            'fixCharacterWidth'     => 'fixCharacterWidth',
-            'uncurlQuotes'          => 'uncurlQuotes',
-            'fixLineBreaks'         => 'fixLineBreaks',
-            'fixSurrogates'         => 'fixSurrogates',
-            'removeControlChars'    => 'removeControlChars',
-        ];
-
-        $configProp = $configMap[$fixerName] ?? $fixerName;
-        $enabled = $config->$configProp;
-
-        if (!$enabled) {
-            return $text;
-        }
-
-        $method = [Fixes::class, $fixerName];
-        $fixed = $method($text);
-
-        if ($steps !== null && $fixed !== $text) {
-            $steps[] = ['apply', $fixerName];
-        }
-
-        return $fixed;
-    }
-
-    /**
-     * Perform one round of encoding detection and repair.
-     *
-     * @return array{string, list<array{string,string}>|null}
-     */
-    private static function fixEncodingOneStep(string $text, TextFixerConfig $config): array
-    {
-        if ($text === '') {
-            return [$text, []];
-        }
-
-        // If text is all ASCII, nothing to do.
-        if (SloppyCodecs::possibleEncoding($text, 'ascii')) {
-            return [$text, []];
-        }
-
-        // If text doesn't look like mojibake, nothing to do.
-        if (!Badness::isBad($text)) {
-            return [$text, []];
-        }
-
-        $possible1byteEncodings = [];
-
-        foreach (CharData::CHARMAP_ENCODINGS as $encoding) {
-            if (!self::possibleEncodingCheck($text, $encoding)) {
-                continue;
-            }
-
-            $possible1byteEncodings[] = $encoding;
-
-            // Encode the text back to bytes using this single-byte encoding.
-            $encodedBytes = self::encodeToBytes($text, $encoding);
-            $encodeStep = ['encode', $encoding];
-            $transcodeSteps = [];
-
-            // Try to decode as UTF-8 (or utf-8-variants).
-            try {
-                $decoding = 'utf-8';
-
-                if (
-                    $config->restoreByteA0
-                    && $encoding !== 'macroman'
-                    && preg_match(CharData::ALTERED_UTF8_RE, $encodedBytes)
-                ) {
-                    $replaced = Fixes::restoreByteA0($encodedBytes);
-                    if ($replaced !== $encodedBytes) {
-                        $transcodeSteps[] = ['transcode', 'restoreByteA0'];
-                        $encodedBytes = $replaced;
-                    }
-                }
-
-                if ($config->replaceLossySequences && str_starts_with($encoding, 'sloppy')) {
-                    $replaced = Fixes::replaceLossySequences($encodedBytes);
-                    if ($replaced !== $encodedBytes) {
-                        $transcodeSteps[] = ['transcode', 'replaceLossySequences'];
-                        $encodedBytes = $replaced;
-                    }
-                }
-
-                // Check for bytes that need utf-8-variants decoder.
-                if (str_contains($encodedBytes, "\xED") || str_contains($encodedBytes, "\xC0")) {
-                    $decoding = 'utf-8-variants';
-                }
-
-                $decodeStep = ['decode', $decoding];
-                $steps = array_merge([$encodeStep], $transcodeSteps, [$decodeStep]);
-
-                if ($decoding === 'utf-8-variants') {
-                    $fixed = Utf8Variants::decode($encodedBytes);
-                } else {
-                    $fixed = self::strictUtf8Decode($encodedBytes);
-                    if ($fixed === null) {
-                        continue; // not valid UTF-8
-                    }
-                }
-
-                return [$fixed, $steps];
-            } catch (\ValueError) {
-                // Decoding failed; try next encoding.
-            }
-        }
-
-        // Try decode_inconsistent_utf8
-        if ($config->decodeInconsistentUtf8) {
-            $detectorRegex = CharData::getUtf8DetectorRegex();
-            if (preg_match($detectorRegex, $text)) {
-                $fixed = Fixes::decodeInconsistentUtf8($text);
-                if ($fixed !== $text) {
-                    return [$fixed, [['apply', 'decodeInconsistentUtf8']]];
-                }
-            }
-        }
-
-        // Latin-1 vs Windows-1252 confusion
-        if (in_array('latin-1', $possible1byteEncodings, true)) {
-            if (in_array('sloppy-windows-1252', $possible1byteEncodings, true)) {
-                // In the intersection → probably legit text.
-                return [$text, []];
-            }
-
-            // Has Latin-1 chars not in Windows-1252 (C1 controls) → reinterpret.
-            $bytes = self::encodeToBytes($text, 'latin-1');
-            if ($bytes !== null) {
-                $fixed = SloppyCodecs::decode($bytes, 'windows-1252');
-                if ($fixed !== $text) {
-                    return [$fixed, [['encode', 'latin-1'], ['decode', 'windows-1252']]];
-                }
-            }
-        }
-
-        // Fix individual C1 control characters.
-        if ($config->fixC1Controls && preg_match(CharData::C1_CONTROL_RE, $text)) {
-            $fixed = Fixes::fixC1Controls($text);
-            return [$fixed, [['transcode', 'fixC1Controls']]];
-        }
-
-        return [$text, []];
-    }
-
-    // -------------------------------------------------------------------------
-    // Encoding helpers
-    // -------------------------------------------------------------------------
-
-    /**
-     * Check whether a string can be represented in the given single-byte encoding.
-     */
-    private static function possibleEncodingCheck(string $text, string $encoding): bool
-    {
-        $encoding = strtolower($encoding);
-
-        if ($encoding === 'ascii') {
-            return (bool) preg_match('/^[\x00-\x7f]*$/u', $text);
-        }
-
-        // For the standard (non-sloppy) encodings we delegate to SloppyCodecs
-        // since they share the same character repertoire.
-        return SloppyCodecs::possibleEncoding($text, $encoding);
-    }
-
-    /**
-     * Encode a UTF-8 string to raw bytes in the given encoding.
-     * Returns null if the encoding is not supported.
-     */
-    private static function encodeToBytes(string $utf8, string $encoding): ?string
-    {
-        $enc = strtolower($encoding);
-
-        if ($enc === 'latin-1' || $enc === 'iso-8859-1') {
-            // Latin-1: codepoint == byte for 0x00-0xFF; drop anything > 0xFF.
-            // In UTF-8, codepoints 0x00-0x7F are single bytes, 0x80-0xFF are
-            // two-byte sequences C2 80 .. C3 BF.  Anything starting with a
-            // lead byte >= 0xC4 is above U+00FF and must be dropped.
-            $len = strlen($utf8);
-            $chunks = [];
-            $copyFrom = 0;
-            $i = 0;
-            while ($i < $len) {
-                $b = ord($utf8[$i]);
-                if ($b < 0x80) {
-                    $i++;
-                    continue;
-                }
-                if ($b === 0xC2 || $b === 0xC3) {
-                    // Two-byte seq for U+0080..U+00FF — emit as single byte.
-                    if ($i > $copyFrom) {
-                        $chunks[] = substr($utf8, $copyFrom, $i - $copyFrom);
-                    }
-                    $cp = (($b & 0x1F) << 6) | (ord($utf8[$i + 1]) & 0x3F);
-                    $chunks[] = chr($cp);
-                    $i += 2;
-                    $copyFrom = $i;
-                    continue;
-                }
-                // Lead byte >= 0xC4: codepoint > 0xFF — drop the sequence.
-                if ($i > $copyFrom) {
-                    $chunks[] = substr($utf8, $copyFrom, $i - $copyFrom);
-                }
-                if (($b & 0xE0) === 0xC0) { $i += 2; }
-                elseif (($b & 0xF0) === 0xE0) { $i += 3; }
-                elseif (($b & 0xF8) === 0xF0) { $i += 4; }
-                else { $i++; }
-                $copyFrom = $i;
-            }
-            if ($copyFrom === 0) {
-                return $utf8; // all ASCII, no changes
-            }
-            if ($copyFrom < $len) {
-                $chunks[] = substr($utf8, $copyFrom);
-            }
-            return implode('', $chunks);
-        }
-
-        if (str_starts_with($enc, 'sloppy-') || str_starts_with($enc, 'sloppy_')) {
-            $base = preg_replace('/^sloppy[-_]/', '', $enc);
-            return SloppyCodecs::encode($utf8, $base);
-        }
-
-        if ($enc === 'iso-8859-2') {
-            $result = @iconv('UTF-8', 'ISO-8859-2//IGNORE', $utf8);
-            return $result !== false ? $result : null;
-        }
-
-        if ($enc === 'macroman') {
-            $result = @iconv('UTF-8', 'MACINTOSH//IGNORE', $utf8);
-            return $result !== false ? $result : null;
-        }
-
-        if ($enc === 'cp437') {
-            $result = @iconv('UTF-8', 'CP437//IGNORE', $utf8);
-            return $result !== false ? $result : null;
-        }
-
-        return null;
-    }
-
-    /**
-     * Strictly decode a binary string as UTF-8.
-     * Returns null if any byte is invalid UTF-8.
-     */
-    private static function strictUtf8Decode(string $bytes): ?string
-    {
-        // Check if the bytes are valid UTF-8.
-        if (!mb_check_encoding($bytes, 'UTF-8')) {
-            return null;
-        }
-        // In PHP, strings are already bytes, so "decoding" UTF-8 is a no-op.
-        return $bytes;
-    }
-
-    // -------------------------------------------------------------------------
-    // apply_plan (for roundtrip compatibility)
-    // -------------------------------------------------------------------------
 
     /**
      * Apply a plan returned by fixAndExplain to transform text.
@@ -531,5 +232,235 @@ final class Ftfy
             }
         }
         return $obj;
+    }
+
+    /** @param list<array{string,string}>|null $steps */
+    private static function tryFix(
+        string $fixerName,
+        string $text,
+        TextFixerConfig $config,
+        ?array &$steps
+    ): string {
+        static $configMap = [
+            'unescapeHtml'          => 'unescapeHtml',
+            'removeTerminalEscapes' => 'removeTerminalEscapes',
+            'fixC1Controls'         => 'fixC1Controls',
+            'fixLatinLigatures'     => 'fixLatinLigatures',
+            'fixCharacterWidth'     => 'fixCharacterWidth',
+            'uncurlQuotes'          => 'uncurlQuotes',
+            'fixLineBreaks'         => 'fixLineBreaks',
+            'fixSurrogates'         => 'fixSurrogates',
+            'removeControlChars'    => 'removeControlChars',
+        ];
+
+        $configProp = $configMap[$fixerName] ?? $fixerName;
+        $enabled = $config->$configProp;
+
+        if (!$enabled) {
+            return $text;
+        }
+
+        $method = [Fixes::class, $fixerName];
+        $fixed = $method($text);
+
+        if ($steps !== null && $fixed !== $text) {
+            $steps[] = ['apply', $fixerName];
+        }
+
+        return $fixed;
+    }
+
+    /** @return array{string, list<array{string,string}>|null} */
+    private static function fixEncodingOneStep(string $text, TextFixerConfig $config): array
+    {
+        if ($text === '') {
+            return [$text, []];
+        }
+
+        if (SloppyCodecs::possibleEncoding($text, 'ascii')) {
+            return [$text, []];
+        }
+
+        if (!Badness::isBad($text)) {
+            return [$text, []];
+        }
+
+        $possible1byteEncodings = [];
+
+        foreach (CharData::CHARMAP_ENCODINGS as $encoding) {
+            if (!self::possibleEncodingCheck($text, $encoding)) {
+                continue;
+            }
+
+            $possible1byteEncodings[] = $encoding;
+
+            $encodedBytes = self::encodeToBytes($text, $encoding);
+            $encodeStep = ['encode', $encoding];
+            $transcodeSteps = [];
+
+            try {
+                $decoding = 'utf-8';
+
+                if (
+                    $config->restoreByteA0
+                    && $encoding !== 'macroman'
+                    && preg_match(CharData::ALTERED_UTF8_RE, $encodedBytes)
+                ) {
+                    $replaced = Fixes::restoreByteA0($encodedBytes);
+                    if ($replaced !== $encodedBytes) {
+                        $transcodeSteps[] = ['transcode', 'restoreByteA0'];
+                        $encodedBytes = $replaced;
+                    }
+                }
+
+                if ($config->replaceLossySequences && str_starts_with($encoding, 'sloppy')) {
+                    $replaced = Fixes::replaceLossySequences($encodedBytes);
+                    if ($replaced !== $encodedBytes) {
+                        $transcodeSteps[] = ['transcode', 'replaceLossySequences'];
+                        $encodedBytes = $replaced;
+                    }
+                }
+
+                if (str_contains($encodedBytes, "\xED") || str_contains($encodedBytes, "\xC0")) {
+                    $decoding = 'utf-8-variants';
+                }
+
+                $decodeStep = ['decode', $decoding];
+                $steps = array_merge([$encodeStep], $transcodeSteps, [$decodeStep]);
+
+                if ($decoding === 'utf-8-variants') {
+                    $fixed = Utf8Variants::decode($encodedBytes);
+                } else {
+                    $fixed = self::strictUtf8Decode($encodedBytes);
+                    if ($fixed === null) {
+                        continue;
+                    }
+                }
+
+                return [$fixed, $steps];
+            } catch (\ValueError) {
+                // Decoding failed; try next encoding.
+            }
+        }
+
+        if ($config->decodeInconsistentUtf8) {
+            $detectorRegex = CharData::getUtf8DetectorRegex();
+            if (preg_match($detectorRegex, $text)) {
+                $fixed = Fixes::decodeInconsistentUtf8($text);
+                if ($fixed !== $text) {
+                    return [$fixed, [['apply', 'decodeInconsistentUtf8']]];
+                }
+            }
+        }
+
+        // Latin-1 vs Windows-1252 confusion
+        if (in_array('latin-1', $possible1byteEncodings, true)) {
+            if (in_array('sloppy-windows-1252', $possible1byteEncodings, true)) {
+                return [$text, []];
+            }
+
+            // Has Latin-1 C1 chars not in Windows-1252 → reinterpret as Windows-1252.
+            $bytes = self::encodeToBytes($text, 'latin-1');
+            if ($bytes !== null) {
+                $fixed = SloppyCodecs::decode($bytes, 'windows-1252');
+                if ($fixed !== $text) {
+                    return [$fixed, [['encode', 'latin-1'], ['decode', 'windows-1252']]];
+                }
+            }
+        }
+
+        if ($config->fixC1Controls && preg_match(CharData::C1_CONTROL_RE, $text)) {
+            $fixed = Fixes::fixC1Controls($text);
+            return [$fixed, [['transcode', 'fixC1Controls']]];
+        }
+
+        return [$text, []];
+    }
+
+    private static function possibleEncodingCheck(string $text, string $encoding): bool
+    {
+        if (strtolower($encoding) === 'ascii') {
+            return (bool) preg_match('/^[\x00-\x7f]*$/u', $text);
+        }
+
+        return SloppyCodecs::possibleEncoding($text, $encoding);
+    }
+
+    private static function encodeToBytes(string $utf8, string $encoding): ?string
+    {
+        $enc = strtolower($encoding);
+
+        if ($enc === 'latin-1' || $enc === 'iso-8859-1') {
+            // Latin-1: codepoint == byte for 0x00-0xFF.
+            // In UTF-8, U+0080-U+00FF are two-byte sequences C2/C3 xx.
+            // Codepoints above U+00FF (lead byte >= 0xC4) are dropped.
+            $len = strlen($utf8);
+            $chunks = [];
+            $copyFrom = 0;
+            $i = 0;
+            while ($i < $len) {
+                $b = ord($utf8[$i]);
+                if ($b < 0x80) {
+                    $i++;
+                    continue;
+                }
+                if ($b === 0xC2 || $b === 0xC3) {
+                    if ($i > $copyFrom) {
+                        $chunks[] = substr($utf8, $copyFrom, $i - $copyFrom);
+                    }
+                    $cp = (($b & 0x1F) << 6) | (ord($utf8[$i + 1]) & 0x3F);
+                    $chunks[] = chr($cp);
+                    $i += 2;
+                    $copyFrom = $i;
+                    continue;
+                }
+                // Lead byte >= 0xC4: codepoint > U+00FF — drop the sequence.
+                if ($i > $copyFrom) {
+                    $chunks[] = substr($utf8, $copyFrom, $i - $copyFrom);
+                }
+                if (($b & 0xE0) === 0xC0) { $i += 2; }
+                elseif (($b & 0xF0) === 0xE0) { $i += 3; }
+                elseif (($b & 0xF8) === 0xF0) { $i += 4; }
+                else { $i++; }
+                $copyFrom = $i;
+            }
+            if ($copyFrom === 0) {
+                return $utf8;
+            }
+            if ($copyFrom < $len) {
+                $chunks[] = substr($utf8, $copyFrom);
+            }
+            return implode('', $chunks);
+        }
+
+        if (str_starts_with($enc, 'sloppy-') || str_starts_with($enc, 'sloppy_')) {
+            $base = preg_replace('/^sloppy[-_]/', '', $enc);
+            return SloppyCodecs::encode($utf8, $base);
+        }
+
+        if ($enc === 'iso-8859-2') {
+            $result = @iconv('UTF-8', 'ISO-8859-2//IGNORE', $utf8);
+            return $result !== false ? $result : null;
+        }
+
+        if ($enc === 'macroman') {
+            $result = @iconv('UTF-8', 'MACINTOSH//IGNORE', $utf8);
+            return $result !== false ? $result : null;
+        }
+
+        if ($enc === 'cp437') {
+            $result = @iconv('UTF-8', 'CP437//IGNORE', $utf8);
+            return $result !== false ? $result : null;
+        }
+
+        return null;
+    }
+
+    private static function strictUtf8Decode(string $bytes): ?string
+    {
+        if (!mb_check_encoding($bytes, 'UTF-8')) {
+            return null;
+        }
+        return $bytes;
     }
 }

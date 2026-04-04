@@ -8,19 +8,12 @@ namespace Ftfy;
  * Mojibake heuristic: detects unlikely character sequences that signal
  * mis-decoded text. Port of ftfy/badness.py.
  *
- * The BADNESS_RE pattern matches pairs/triples of characters from known
- * mojibake categories. A non-zero badness count means the text is probably
- * mojibake.
+ * BADNESS_RE matches pairs/triples of characters from known mojibake categories.
+ * A non-zero match count means the text is probably mojibake.
  */
 final class Badness
 {
-    // -------------------------------------------------------------------------
-    // Character category definitions
-    //
     // Each constant is a PCRE character-class fragment (no surrounding []).
-    // They are composed into BADNESS_RE below.
-    // -------------------------------------------------------------------------
-
     private const C1        = '\x{0080}-\x{009F}';
     private const BAD       =
         '\x{00A6}'   // BROKEN BAR
@@ -88,9 +81,9 @@ final class Badness
         . '\x{00B5}' // MICRO SIGN
         . '\x{00F7}' // DIVISION SIGN
         . '\x{2044}' // FRACTION SLASH
-        . '\x{2202}\x{2206}\x{220F}\x{2211}' // math operators
-        . '\x{221A}\x{221E}\x{2229}\x{222B}' // more math
-        . '\x{2248}\x{2260}\x{2261}\x{2264}\x{2265}' // comparison
+        . '\x{2202}\x{2206}\x{220F}\x{2211}'
+        . '\x{221A}\x{221E}\x{2229}\x{222B}'
+        . '\x{2248}\x{2260}\x{2261}\x{2264}\x{2265}'
         . '\x{2116}'; // NUMERO SIGN
 
     private const KAOMOJI   =
@@ -106,9 +99,9 @@ final class Badness
 
     private const UPPER_ACCENTED =
         '\x{00C0}-\x{00D1}'
-        . '\x{00D8}'  // O WITH STROKE
-        . '\x{00DC}'  // U WITH DIAERESIS
-        . '\x{00DD}'  // Y WITH ACUTE
+        . '\x{00D8}'
+        . '\x{00DC}'
+        . '\x{00DD}'
         . '\x{0102}\x{0100}\x{0104}\x{0106}\x{010C}\x{010E}\x{0110}'
         . '\x{0118}\x{011A}\x{011E}\x{0122}\x{012A}\x{0130}\x{0136}'
         . '\x{0139}\x{013B}\x{013D}\x{0141}\x{0143}\x{0145}\x{0147}'
@@ -129,15 +122,15 @@ final class Badness
 
     private const UPPER_COMMON =
         '\x{00DE}'    // LATIN CAPITAL LETTER THORN
-        . '\x{0391}-\x{03A9}'  // Greek capital
+        . '\x{0391}-\x{03A9}'
         . '\x{0386}\x{0388}\x{0389}\x{038A}\x{038C}\x{038E}\x{038F}'
         . '\x{03AA}\x{03AB}'
-        . '\x{0400}-\x{042F}'; // Cyrillic capital (U+0400-U+042F)
+        . '\x{0400}-\x{042F}';
 
     private const LOWER_COMMON =
-        '\x{03B1}-\x{03C9}'  // Greek small
+        '\x{03B1}-\x{03C9}'
         . '\x{03AC}\x{03AD}\x{03AE}\x{03AF}\x{03B0}'
-        . '\x{0430}-\x{045F}'; // Cyrillic small
+        . '\x{0430}-\x{045F}';
 
     private const BOX =
         '\x{2502}\x{250C}\x{2510}\x{2518}\x{251C}\x{2524}\x{252C}\x{253C}'
@@ -247,18 +240,12 @@ final class Badness
         return self::$pattern;
     }
 
-    /**
-     * Count the number of badness matches in the text.
-     */
     public static function badness(string $text): int
     {
         $count = preg_match_all(self::getPattern(), $text);
         return $count === false ? 0 : $count;
     }
 
-    /**
-     * Return true if the text looks like it contains mojibake.
-     */
     public static function isBad(string $text): bool
     {
         return (bool) preg_match(self::getPattern(), $text);
