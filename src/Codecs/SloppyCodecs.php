@@ -161,12 +161,12 @@ final class SloppyCodecs
     public static function decode(string $bytes, string $encoding): string
     {
         $table = self::getDecodeTable($encoding);
-        $result = '';
+        $chunks = [];
         $len = strlen($bytes);
         for ($i = 0; $i < $len; $i++) {
-            $result .= $table[ord($bytes[$i])];
+            $chunks[] = $table[ord($bytes[$i])];
         }
-        return $result;
+        return implode('', $chunks);
     }
 
     /**
@@ -188,18 +188,18 @@ final class SloppyCodecs
         }
         $encTable = self::$encodeTables[$key];
 
-        $result = '';
+        $chunks = [];
         $chars = mb_str_split($utf8, 1, 'UTF-8');
         foreach ($chars as $char) {
             $cp = mb_ord($char, 'UTF-8');
             if ($cp < 0x80) {
-                $result .= chr($cp);
+                $chunks[] = chr($cp);
             } elseif (isset($encTable[$cp])) {
-                $result .= chr($encTable[$cp]);
+                $chunks[] = chr($encTable[$cp]);
             }
             // else: drop unencodable character
         }
-        return $result;
+        return implode('', $chunks);
     }
 
     /**

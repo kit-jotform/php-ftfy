@@ -134,7 +134,7 @@ final class Fixes
         // In PHP, a string that contains surrogates as UTF-8 bytes (CESU-8) will
         // have the bytes \xED\xA0...\xED\xB0... We detect and convert these.
         $bytes = $text; // already raw bytes in PHP
-        $out = '';
+        $chunks = [];
         $len = strlen($bytes);
         $i = 0;
         while ($i < $len) {
@@ -151,7 +151,7 @@ final class Fixes
                 $low  = 0xD000 | ((ord($bytes[$i + 4]) & 0x3F) << 6) | (ord($bytes[$i + 5]) & 0x3F);
                 // $high ∈ D800-DBFF, $low ∈ DC00-DFFF
                 $cp = 0x10000 + (($high - 0xD800) << 10) + ($low - 0xDC00);
-                $out .= mb_chr($cp, 'UTF-8');
+                $chunks[] = mb_chr($cp, 'UTF-8');
                 $i += 6;
                 continue;
             }
@@ -162,7 +162,7 @@ final class Fixes
                 && (ord($bytes[$i + 1]) & 0xE0) === 0xA0
                 && (ord($bytes[$i + 2]) & 0xC0) === 0x80
             ) {
-                $out .= "\u{FFFD}";
+                $chunks[] = "\u{FFFD}";
                 $i += 3;
                 continue;
             }
@@ -173,16 +173,16 @@ final class Fixes
                 && (ord($bytes[$i + 1]) & 0xE0) === 0xB0
                 && (ord($bytes[$i + 2]) & 0xC0) === 0x80
             ) {
-                $out .= "\u{FFFD}";
+                $chunks[] = "\u{FFFD}";
                 $i += 3;
                 continue;
             }
 
-            $out .= $bytes[$i];
+            $chunks[] = $bytes[$i];
             $i++;
         }
 
-        return $out;
+        return implode('', $chunks);
     }
 
     // -------------------------------------------------------------------------

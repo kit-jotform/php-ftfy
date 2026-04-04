@@ -249,8 +249,15 @@ final class CharData
      *
      * This is the PHP equivalent of chardata.UTF8_DETECTOR_RE.
      */
+    /** @var string|null */
+    private static ?string $utf8DetectorRegex = null;
+
     public static function getUtf8DetectorRegex(): string
     {
+        if (self::$utf8DetectorRegex !== null) {
+            return self::$utf8DetectorRegex;
+        }
+
         // Character classes from UTF8_CLUES in chardata.py, expressed as
         // PCRE Unicode escapes.
 
@@ -319,13 +326,15 @@ final class CharData
             . '\x{0490}\x{0491}'
             . '\x{2020}\x{2021}\x{2030}\x{2039}\x{203A}\x{20AC}\x{2116}\x{2122}';
 
-        return
+        self::$utf8DetectorRegex =
             '/(?<![' . $contStrict . '])'
             . '(?:'
             .   '[' . $first2 . '][' . $cont . ']'
             .   '|[' . $first3 . '][' . $cont . ']{2}'
             .   '|[' . $first4 . '][' . $cont . ']{3}'
             . ')+/u';
+
+        return self::$utf8DetectorRegex;
     }
 
     // -------------------------------------------------------------------------

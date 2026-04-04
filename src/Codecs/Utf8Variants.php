@@ -20,7 +20,7 @@ final class Utf8Variants
      */
     public static function decode(string $bytes): string
     {
-        $out = '';
+        $chunks = [];
         $len = strlen($bytes);
         $i = 0;
 
@@ -29,7 +29,7 @@ final class Utf8Variants
 
             // Java null: C0 80  →  U+0000
             if ($b === 0xC0 && $i + 1 < $len && ord($bytes[$i + 1]) === 0x80) {
-                $out .= "\u{0000}";
+                $chunks[] = "\u{0000}";
                 $i += 2;
                 continue;
             }
@@ -48,7 +48,7 @@ final class Utf8Variants
                 $low  = ((ord($bytes[$i + 3]) & 0x0F) << 12) | ((ord($bytes[$i + 4]) & 0x3F) << 6) | (ord($bytes[$i + 5]) & 0x3F);
                 // $high is in 0xD800-0xDBFF, $low is in 0xDC00-0xDFFF
                 $codepoint = 0x10000 + (($high - 0xD800) << 10) + ($low - 0xDC00);
-                $out .= mb_chr($codepoint, 'UTF-8');
+                $chunks[] = mb_chr($codepoint, 'UTF-8');
                 $i += 6;
                 continue;
             }
@@ -64,14 +64,14 @@ final class Utf8Variants
                 $seqLen = 4;
             } else {
                 // Continuation byte or invalid — output replacement char and advance.
-                $out .= "\u{FFFD}";
+                $chunks[] = "\u{FFFD}";
                 $i++;
                 continue;
             }
 
             if ($i + $seqLen > $len) {
                 // Truncated sequence at end of input.
-                $out .= "\u{FFFD}";
+                $chunks[] = "\u{FFFD}";
                 $i = $len;
                 continue;
             }
@@ -79,13 +79,13 @@ final class Utf8Variants
             $seq = substr($bytes, $i, $seqLen);
             $decoded = @mb_convert_encoding($seq, 'UTF-8', 'UTF-8');
             if ($decoded === false || $decoded === '') {
-                $out .= "\u{FFFD}";
+                $chunks[] = "\u{FFFD}";
             } else {
-                $out .= $decoded;
+                $chunks[] = $decoded;
             }
             $i += $seqLen;
         }
 
-        return $out;
+        return implode('', $chunks);
     }
 }
