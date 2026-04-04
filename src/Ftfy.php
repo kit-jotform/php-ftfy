@@ -193,14 +193,12 @@ final class Ftfy
             return true;
         }
 
-        // Byte-level fast path: printable ASCII + TAB + LF only, no & or ESC.
         if (!preg_match('/[^\x09\x0A\x20-\x25\x27-\x7E]|&/', $text)) {
             return false;
         }
 
         $config ??= new TextFixerConfig(explain: false);
 
-        // Cheap byte-level checks first.
         if ($config->fixLineBreaks
             && (str_contains($text, "\r")
                 || str_contains($text, "\u{2028}")
@@ -221,7 +219,6 @@ final class Ftfy
             return true;
         }
 
-        // One regex pass for all character-class fixers instead of five separate ones.
         $charClasses = [];
         if ($config->fixC1Controls) {
             $charClasses[] = '\x{0080}-\x{009F}';
@@ -254,9 +251,6 @@ final class Ftfy
             return true;
         }
 
-        // Mojibake pre-filter: C1 controls or a Latin-1 "lead + continuation"
-        // pair must be present for isBad() to fire. Skip the expensive regex
-        // when neither pattern exists.
         if ($config->fixEncoding && !SloppyCodecs::possibleEncoding($text, 'ascii')) {
             if (preg_match('/[\x{0080}-\x{009F}]|[\x{00C0}-\x{00DF}][\x{0080}-\x{00BF}]/u', $text)
                 && Badness::isBad($text)
