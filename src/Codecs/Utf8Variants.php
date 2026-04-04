@@ -23,14 +23,19 @@ final class Utf8Variants
         $chunks = [];
         $len = strlen($bytes);
         $i = 0;
+        $copyFrom = 0; // start of current verbatim (valid UTF-8) run
 
         while ($i < $len) {
             $b = ord($bytes[$i]);
 
             // Java null: C0 80  →  U+0000
             if ($b === 0xC0 && $i + 1 < $len && ord($bytes[$i + 1]) === 0x80) {
+                if ($i > $copyFrom) {
+                    $chunks[] = substr($bytes, $copyFrom, $i - $copyFrom);
+                }
                 $chunks[] = "\u{0000}";
                 $i += 2;
+                $copyFrom = $i;
                 continue;
             }
 
@@ -44,18 +49,24 @@ final class Utf8Variants
                 && (ord($bytes[$i + 4]) & 0xF0) === 0xB0  // low surrogate lead
                 && (ord($bytes[$i + 5]) & 0xC0) === 0x80
             ) {
+                if ($i > $copyFrom) {
+                    $chunks[] = substr($bytes, $copyFrom, $i - $copyFrom);
+                }
                 $high = (($b & 0x0F) << 12) | ((ord($bytes[$i + 1]) & 0x3F) << 6) | (ord($bytes[$i + 2]) & 0x3F);
                 $low  = ((ord($bytes[$i + 3]) & 0x0F) << 12) | ((ord($bytes[$i + 4]) & 0x3F) << 6) | (ord($bytes[$i + 5]) & 0x3F);
                 // $high is in 0xD800-0xDBFF, $low is in 0xDC00-0xDFFF
                 $codepoint = 0x10000 + (($high - 0xD800) << 10) + ($low - 0xDC00);
                 $chunks[] = mb_chr($codepoint, 'UTF-8');
                 $i += 6;
+                $copyFrom = $i;
                 continue;
             }
 
             // Standard UTF-8: determine sequence length from lead byte.
             if ($b < 0x80) {
-                $seqLen = 1;
+                // ASCII byte — skip quickly; it will be bulk-copied later.
+                $i++;
+                continue;
             } elseif (($b & 0xE0) === 0xC0) {
                 $seqLen = 2;
             } elseif (($b & 0xF0) === 0xE0) {
@@ -64,26 +75,38 @@ final class Utf8Variants
                 $seqLen = 4;
             } else {
                 // Continuation byte or invalid — output replacement char and advance.
+                if ($i > $copyFrom) {
+                    $chunks[] = substr($bytes, $copyFrom, $i - $copyFrom);
+                }
                 $chunks[] = "\u{FFFD}";
                 $i++;
+                $copyFrom = $i;
                 continue;
             }
 
             if ($i + $seqLen > $len) {
                 // Truncated sequence at end of input.
+                if ($i > $copyFrom) {
+                    $chunks[] = substr($bytes, $copyFrom, $i - $copyFrom);
+                }
                 $chunks[] = "\u{FFFD}";
                 $i = $len;
+                $copyFrom = $i;
                 continue;
             }
 
-            $seq = substr($bytes, $i, $seqLen);
-            $decoded = @mb_convert_encoding($seq, 'UTF-8', 'UTF-8');
-            if ($decoded === false || $decoded === '') {
-                $chunks[] = "\u{FFFD}";
-            } else {
-                $chunks[] = $decoded;
-            }
+            // Valid-length multi-byte sequence — just skip over it; it will be
+            // bulk-copied as part of the verbatim run.
             $i += $seqLen;
+        }
+
+        // If no special sequences were found, return the original string.
+        if ($copyFrom === 0) {
+            return $bytes;
+        }
+
+        if ($copyFrom < $len) {
+            $chunks[] = substr($bytes, $copyFrom);
         }
 
         return implode('', $chunks);

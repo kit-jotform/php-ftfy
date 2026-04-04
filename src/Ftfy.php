@@ -34,19 +34,28 @@ final class Ftfy
         $config ??= new TextFixerConfig(explain: false);
         $config = $config->with(explain: false);
 
+        // "\n" is a single byte in UTF-8, so byte-level strpos/substr is safe
+        // for splitting on newlines and dramatically faster than mb_strpos on
+        // large inputs.
         $out = [];
         $pos = 0;
-        $len = mb_strlen($text, 'UTF-8');
+        $len = strlen($text);
 
         while ($pos < $len) {
-            $nlPos = mb_strpos($text, "\n", $pos, 'UTF-8');
+            $nlPos = strpos($text, "\n", $pos);
             $textbreak = ($nlPos === false) ? $len : $nlPos + 1;
 
-            if (($textbreak - $pos) > $config->maxDecodeLength) {
-                $textbreak = $pos + $config->maxDecodeLength;
+            // maxDecodeLength is a character count — for the bounding check we
+            // need mb_substr to cut at a character boundary.  But in the common
+            // case the segment is short enough and we can use fast substr.
+            if (($textbreak - $pos) > $config->maxDecodeLength * 4) {
+                // Certainly over the limit (worst-case 4 bytes per character).
+                $segment = mb_substr($text, mb_strlen(substr($text, 0, $pos), 'UTF-8'), $config->maxDecodeLength, 'UTF-8');
+                $pos += strlen($segment);
+            } else {
+                $segment = substr($text, $pos, $textbreak - $pos);
+                $pos = $textbreak;
             }
-
-            $segment = mb_substr($text, $pos, $textbreak - $pos, 'UTF-8');
 
             if ($config->unescapeHtml === 'auto' && str_contains($segment, '<')) {
                 $config = $config->with(unescapeHtml: false);
@@ -54,7 +63,6 @@ final class Ftfy
 
             [$fixed] = self::fixAndExplain($segment, $config);
             $out[] = $fixed;
-            $pos = $textbreak;
         }
 
         return implode('', $out);
@@ -175,8 +183,18 @@ final class Ftfy
     public static function fixEncoding(string $text, ?TextFixerConfig $config = null): string
     {
         $config ??= new TextFixerConfig(explain: false);
-        [$fixed] = self::fixEncodingAndExplain($text, $config);
-        return $fixed;
+
+        if (!$config->fixEncoding) {
+            return $text;
+        }
+
+        while (true) {
+            $prev = $text;
+            [$text] = self::fixEncodingOneStep($text, $config);
+            if ($text === $prev) {
+                return $text;
+            }
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -372,13 +390,46 @@ final class Ftfy
         $enc = strtolower($encoding);
 
         if ($enc === 'latin-1' || $enc === 'iso-8859-1') {
-            // Latin-1: codepoint == byte for 0x00-0xFF; drop anything else.
+            // Latin-1: codepoint == byte for 0x00-0xFF; drop anything > 0xFF.
+            // In UTF-8, codepoints 0x00-0x7F are single bytes, 0x80-0xFF are
+            // two-byte sequences C2 80 .. C3 BF.  Anything starting with a
+            // lead byte >= 0xC4 is above U+00FF and must be dropped.
+            $len = strlen($utf8);
             $chunks = [];
-            foreach (mb_str_split($utf8, 1, 'UTF-8') as $char) {
-                $cp = mb_ord($char, 'UTF-8');
-                if ($cp <= 0xFF) {
-                    $chunks[] = chr($cp);
+            $copyFrom = 0;
+            $i = 0;
+            while ($i < $len) {
+                $b = ord($utf8[$i]);
+                if ($b < 0x80) {
+                    $i++;
+                    continue;
                 }
+                if ($b === 0xC2 || $b === 0xC3) {
+                    // Two-byte seq for U+0080..U+00FF — emit as single byte.
+                    if ($i > $copyFrom) {
+                        $chunks[] = substr($utf8, $copyFrom, $i - $copyFrom);
+                    }
+                    $cp = (($b & 0x1F) << 6) | (ord($utf8[$i + 1]) & 0x3F);
+                    $chunks[] = chr($cp);
+                    $i += 2;
+                    $copyFrom = $i;
+                    continue;
+                }
+                // Lead byte >= 0xC4: codepoint > 0xFF — drop the sequence.
+                if ($i > $copyFrom) {
+                    $chunks[] = substr($utf8, $copyFrom, $i - $copyFrom);
+                }
+                if (($b & 0xE0) === 0xC0) { $i += 2; }
+                elseif (($b & 0xF0) === 0xE0) { $i += 3; }
+                elseif (($b & 0xF8) === 0xF0) { $i += 4; }
+                else { $i++; }
+                $copyFrom = $i;
+            }
+            if ($copyFrom === 0) {
+                return $utf8; // all ASCII, no changes
+            }
+            if ($copyFrom < $len) {
+                $chunks[] = substr($utf8, $copyFrom);
             }
             return implode('', $chunks);
         }

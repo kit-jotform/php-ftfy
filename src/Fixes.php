@@ -279,12 +279,15 @@ final class Fixes
     public static function decodeInconsistentUtf8(string $text): string
     {
         $detectorRegex = CharData::getUtf8DetectorRegex();
+        $textLen = strlen($text);
         return preg_replace_callback(
             $detectorRegex,
-            static function (array $m) use ($detectorRegex): string {
+            static function (array $m) use ($textLen): string {
                 $substr = $m[0];
-                if (strlen($substr) < strlen($detectorRegex) && Badness::isBad($substr)) {
-                    // Recursion guard: only fix if shorter than the full text
+                // Only recurse into fixEncoding when the match is strictly
+                // shorter than the whole input — prevents infinite recursion
+                // when the entire text keeps matching the detector regex.
+                if (strlen($substr) < $textLen && Badness::isBad($substr)) {
                     return Ftfy::fixEncoding($substr);
                 }
                 return $substr;
@@ -297,22 +300,21 @@ final class Fixes
     // Fix C1 controls
     // -------------------------------------------------------------------------
 
+    /** @var array<string,string>|null Cached C1 → Windows-1252 replacement map */
+    private static ?array $c1Map = null;
+
     public static function fixC1Controls(string $text): string
     {
-        // Replace C1 control characters (U+0080–U+009F) with their Windows-1252
-        // equivalents (same as what HTML5 browsers do).
-        return preg_replace_callback(
-            CharData::C1_CONTROL_RE,
-            static function (array $m): string {
-                // Encode the character as Latin-1 byte, decode as sloppy-windows-1252
-                $byte = mb_ord($m[0], 'UTF-8');
-                if ($byte >= 0x80 && $byte <= 0x9F) {
-                    return SloppyCodecs::decode(chr($byte), 'windows-1252');
-                }
-                return $m[0];
-            },
-            $text
-        ) ?? $text;
+        // Pre-compute the 32 C1 control → Windows-1252 mappings once.
+        if (self::$c1Map === null) {
+            self::$c1Map = [];
+            for ($byte = 0x80; $byte <= 0x9F; $byte++) {
+                $utf8Char = mb_chr($byte, 'UTF-8');
+                self::$c1Map[$utf8Char] = SloppyCodecs::decode(chr($byte), 'windows-1252');
+            }
+        }
+
+        return strtr($text, self::$c1Map);
     }
 
     // -------------------------------------------------------------------------

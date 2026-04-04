@@ -118,8 +118,14 @@ final class SloppyCodecs
     /** @var array<string, string[]> Runtime decode tables (byte index → UTF-8 char) */
     private static array $decodeTables = [];
 
+    /** @var array<string, string> Runtime strtr maps for decode (byte→UTF-8 string) */
+    private static array $strtrDecodeMaps = [];
+
     /** @var array<string, array<int,int>> Runtime encode tables (codepoint → byte) */
     private static array $encodeTables = [];
+
+    /** @var array<string, string> Runtime strtr maps for encode (UTF-8 char→byte) */
+    private static array $strtrEncodeMaps = [];
 
     /**
      * Return the full 256-entry decode table for an encoding as an array of
@@ -160,13 +166,24 @@ final class SloppyCodecs
      */
     public static function decode(string $bytes, string $encoding): string
     {
-        $table = self::getDecodeTable($encoding);
-        $chunks = [];
-        $len = strlen($bytes);
-        for ($i = 0; $i < $len; $i++) {
-            $chunks[] = $table[ord($bytes[$i])];
+        $key = self::normalise($encoding);
+        if (!isset(self::$strtrDecodeMaps[$key])) {
+            $table = self::getDecodeTable($encoding);
+            // Build a byte→string translation map for strtr().
+            // Only include bytes whose decoded form differs from their Latin-1
+            // identity (i.e. the byte itself as a UTF-8 code unit).
+            $map = [];
+            for ($b = 0; $b < 256; $b++) {
+                $from = chr($b);
+                $to = $table[$b];
+                if ($from !== $to) {
+                    $map[$from] = $to;
+                }
+            }
+            self::$strtrDecodeMaps[$key] = $map;
         }
-        return implode('', $chunks);
+
+        return strtr($bytes, self::$strtrDecodeMaps[$key]);
     }
 
     /**
@@ -188,13 +205,41 @@ final class SloppyCodecs
         }
         $encTable = self::$encodeTables[$key];
 
+        // Iterate at the byte level to avoid mb_str_split + mb_ord overhead.
+        $len = strlen($utf8);
         $chunks = [];
-        $chars = mb_str_split($utf8, 1, 'UTF-8');
-        foreach ($chars as $char) {
-            $cp = mb_ord($char, 'UTF-8');
-            if ($cp < 0x80) {
-                $chunks[] = chr($cp);
-            } elseif (isset($encTable[$cp])) {
+        $i = 0;
+        while ($i < $len) {
+            $b = ord($utf8[$i]);
+            if ($b < 0x80) {
+                // ASCII: find the end of the ASCII run and copy in bulk.
+                $start = $i;
+                $i++;
+                while ($i < $len && ord($utf8[$i]) < 0x80) {
+                    $i++;
+                }
+                $chunks[] = substr($utf8, $start, $i - $start);
+                continue;
+            }
+            // Decode UTF-8 lead byte to get codepoint and sequence length.
+            if (($b & 0xE0) === 0xC0) {
+                $cp = $b & 0x1F;
+                $seqLen = 2;
+            } elseif (($b & 0xF0) === 0xE0) {
+                $cp = $b & 0x0F;
+                $seqLen = 3;
+            } elseif (($b & 0xF8) === 0xF0) {
+                $cp = $b & 0x07;
+                $seqLen = 4;
+            } else {
+                $i++;
+                continue; // invalid lead byte, skip
+            }
+            for ($j = 1; $j < $seqLen && $i + $j < $len; $j++) {
+                $cp = ($cp << 6) | (ord($utf8[$i + $j]) & 0x3F);
+            }
+            $i += $seqLen;
+            if (isset($encTable[$cp])) {
                 $chunks[] = chr($encTable[$cp]);
             }
             // else: drop unencodable character
