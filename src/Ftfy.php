@@ -77,6 +77,17 @@ final class Ftfy
 
         $steps = $config->explain ? [] : null;
 
+        $normConst = null;
+        if ($config->normalization !== null) {
+            $normConst = match ($config->normalization) {
+                'NFC'  => \Normalizer::FORM_C,
+                'NFD'  => \Normalizer::FORM_D,
+                'NFKC' => \Normalizer::FORM_KC,
+                'NFKD' => \Normalizer::FORM_KD,
+                default => \Normalizer::FORM_C,
+            };
+        }
+
         while (true) {
             $origText = $text;
 
@@ -114,14 +125,7 @@ final class Ftfy
             }
 
             // 4. Unicode normalisation
-            if ($config->normalization !== null) {
-                $normConst = match ($config->normalization) {
-                    'NFC'  => \Normalizer::FORM_C,
-                    'NFD'  => \Normalizer::FORM_D,
-                    'NFKC' => \Normalizer::FORM_KC,
-                    'NFKD' => \Normalizer::FORM_KD,
-                    default => \Normalizer::FORM_C,
-                };
+            if ($normConst !== null) {
                 $normalised = \Normalizer::normalize($text, $normConst);
                 if ($normalised !== false && $normalised !== $text) {
                     if ($steps !== null) {
@@ -369,14 +373,14 @@ final class Ftfy
 
         if ($enc === 'latin-1' || $enc === 'iso-8859-1') {
             // Latin-1: codepoint == byte for 0x00-0xFF; drop anything else.
-            $bytes = '';
+            $chunks = [];
             foreach (mb_str_split($utf8, 1, 'UTF-8') as $char) {
                 $cp = mb_ord($char, 'UTF-8');
                 if ($cp <= 0xFF) {
-                    $bytes .= chr($cp);
+                    $chunks[] = chr($cp);
                 }
             }
-            return $bytes;
+            return implode('', $chunks);
         }
 
         if (str_starts_with($enc, 'sloppy-') || str_starts_with($enc, 'sloppy_')) {

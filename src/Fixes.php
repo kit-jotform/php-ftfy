@@ -107,13 +107,14 @@ final class Fixes
 
     public static function fixLineBreaks(string $text): string
     {
-        // Order matters: CRLF before CR
+        // Normalize CRLF to LF first, then collapse all other line-ending
+        // variants in a single pass.
         $text = str_replace("\r\n", "\n", $text);
-        $text = str_replace("\r", "\n", $text);
-        $text = str_replace("\u{2028}", "\n", $text); // LINE SEPARATOR
-        $text = str_replace("\u{2029}", "\n", $text); // PARAGRAPH SEPARATOR
-        $text = str_replace("\u{0085}", "\n", $text); // NEXT LINE
-        return $text;
+        return str_replace(
+            ["\r", "\u{2028}", "\u{2029}", "\u{0085}"],
+            "\n",
+            $text
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -137,49 +138,65 @@ final class Fixes
         $chunks = [];
         $len = strlen($bytes);
         $i = 0;
+        $copyFrom = 0; // start of the next verbatim run
         while ($i < $len) {
+            if (ord($bytes[$i]) !== 0xED) {
+                $i++;
+                continue;
+            }
             if (
-                ord($bytes[$i]) === 0xED
-                && $i + 5 < $len
+                $i + 5 < $len
                 && (ord($bytes[$i + 1]) & 0xF0) === 0xA0
                 && (ord($bytes[$i + 2]) & 0xC0) === 0x80
                 && ord($bytes[$i + 3]) === 0xED
                 && (ord($bytes[$i + 4]) & 0xF0) === 0xB0
                 && (ord($bytes[$i + 5]) & 0xC0) === 0x80
             ) {
+                if ($i > $copyFrom) {
+                    $chunks[] = substr($bytes, $copyFrom, $i - $copyFrom);
+                }
                 $high = 0xD000 | ((ord($bytes[$i + 1]) & 0x3F) << 6) | (ord($bytes[$i + 2]) & 0x3F);
                 $low  = 0xD000 | ((ord($bytes[$i + 4]) & 0x3F) << 6) | (ord($bytes[$i + 5]) & 0x3F);
                 // $high ∈ D800-DBFF, $low ∈ DC00-DFFF
                 $cp = 0x10000 + (($high - 0xD800) << 10) + ($low - 0xDC00);
                 $chunks[] = mb_chr($cp, 'UTF-8');
                 $i += 6;
+                $copyFrom = $i;
                 continue;
             }
             // Isolated high surrogate: ED [A0-AF] xx
             if (
-                ord($bytes[$i]) === 0xED
-                && $i + 2 < $len
+                $i + 2 < $len
                 && (ord($bytes[$i + 1]) & 0xE0) === 0xA0
                 && (ord($bytes[$i + 2]) & 0xC0) === 0x80
             ) {
+                if ($i > $copyFrom) {
+                    $chunks[] = substr($bytes, $copyFrom, $i - $copyFrom);
+                }
                 $chunks[] = "\u{FFFD}";
                 $i += 3;
+                $copyFrom = $i;
                 continue;
             }
             // Isolated low surrogate: ED [B0-BF] xx
             if (
-                ord($bytes[$i]) === 0xED
-                && $i + 2 < $len
+                $i + 2 < $len
                 && (ord($bytes[$i + 1]) & 0xE0) === 0xB0
                 && (ord($bytes[$i + 2]) & 0xC0) === 0x80
             ) {
+                if ($i > $copyFrom) {
+                    $chunks[] = substr($bytes, $copyFrom, $i - $copyFrom);
+                }
                 $chunks[] = "\u{FFFD}";
                 $i += 3;
+                $copyFrom = $i;
                 continue;
             }
-
-            $chunks[] = $bytes[$i];
             $i++;
+        }
+        // Append any remaining verbatim bytes.
+        if ($copyFrom < $len) {
+            $chunks[] = substr($bytes, $copyFrom);
         }
 
         return implode('', $chunks);
