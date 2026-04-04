@@ -177,6 +177,98 @@ final class Ftfy
     }
 
     /**
+     * Fast dry-run: does the text need fixing?
+     *
+     * Checks byte/character patterns each fixer targets without performing
+     * corrections. Short-circuits on the first match. Use as a gate before
+     * fixText() on hot paths.
+     */
+    public static function needsFix(string $text, ?TextFixerConfig $config = null): bool
+    {
+        if ($text === '') {
+            return false;
+        }
+
+        if (!mb_check_encoding($text, 'UTF-8')) {
+            return true;
+        }
+
+        // Byte-level fast path: printable ASCII + TAB + LF only, no & or ESC.
+        if (!preg_match('/[^\x09\x0A\x20-\x25\x27-\x7E]|&/', $text)) {
+            return false;
+        }
+
+        $config ??= new TextFixerConfig(explain: false);
+
+        // Cheap byte-level checks first.
+        if ($config->fixLineBreaks
+            && (str_contains($text, "\r")
+                || str_contains($text, "\u{2028}")
+                || str_contains($text, "\u{2029}")
+                || str_contains($text, "\u{0085}"))
+        ) {
+            return true;
+        }
+
+        if ($config->removeTerminalEscapes && str_contains($text, "\033")) {
+            return true;
+        }
+
+        if ($config->unescapeHtml !== false
+            && ($config->unescapeHtml !== 'auto' || !str_contains($text, '<'))
+            && preg_match(CharData::HTML_ENTITY_RE, $text)
+        ) {
+            return true;
+        }
+
+        // One regex pass for all character-class fixers instead of five separate ones.
+        $charClasses = [];
+        if ($config->fixC1Controls) {
+            $charClasses[] = '\x{0080}-\x{009F}';
+        }
+        if ($config->uncurlQuotes) {
+            $charClasses[] = '\x{02BC}\x{2018}-\x{201F}';
+        }
+        if ($config->fixLatinLigatures) {
+            $charClasses[] = '\x{FB00}-\x{FB06}\x{0132}\x{0133}\x{0149}\x{01C4}-\x{01CC}\x{01F1}-\x{01F3}';
+        }
+        if ($config->fixCharacterWidth) {
+            $charClasses[] = '\x{3000}\x{FF01}-\x{FFEF}';
+        }
+        if ($config->removeControlChars) {
+            $charClasses[] = '\x{0000}-\x{0008}\x{000B}\x{000E}-\x{001F}\x{007F}\x{206A}-\x{206F}\x{FEFF}\x{FFF9}-\x{FFFC}';
+        }
+        if ($charClasses !== [] && preg_match('/[' . implode('', $charClasses) . ']/u', $text)) {
+            return true;
+        }
+
+        if ($config->normalization !== null
+            && !\Normalizer::isNormalized($text, match ($config->normalization) {
+                'NFC'  => \Normalizer::FORM_C,
+                'NFD'  => \Normalizer::FORM_D,
+                'NFKC' => \Normalizer::FORM_KC,
+                'NFKD' => \Normalizer::FORM_KD,
+                default => \Normalizer::FORM_C,
+            })
+        ) {
+            return true;
+        }
+
+        // Mojibake pre-filter: C1 controls or a Latin-1 "lead + continuation"
+        // pair must be present for isBad() to fire. Skip the expensive regex
+        // when neither pattern exists.
+        if ($config->fixEncoding && !SloppyCodecs::possibleEncoding($text, 'ascii')) {
+            if (preg_match('/[\x{0080}-\x{009F}]|[\x{00C0}-\x{00DF}][\x{0080}-\x{00BF}]/u', $text)
+                && Badness::isBad($text)
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Apply a plan returned by fixAndExplain to transform text.
      *
      * Each step is [operation, parameter] where operation is one of:

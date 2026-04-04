@@ -63,6 +63,34 @@ $fixed = Ftfy::fixEncoding("l'humanitÃ©");
 // l'humanité
 ```
 
+### `Ftfy::needsFix(string $text, ?TextFixerConfig $config = null): bool`
+
+Fast dry-run that checks whether text needs fixing without performing corrections. Use as a gate before `fixText()` on hot paths — 10-26x faster depending on input.
+
+```php
+use Ftfy\Ftfy;
+
+if (Ftfy::needsFix($text)) {
+    $text = Ftfy::fixText($text);
+}
+
+// Clean text exits almost instantly
+Ftfy::needsFix('Hello world');   // false
+Ftfy::needsFix('Héllo wörld');   // false
+
+// Detects all fixable issues
+Ftfy::needsFix('schÃ¶n');        // true (mojibake)
+Ftfy::needsFix('&amp; test');    // true (HTML entity)
+Ftfy::needsFix("\u{201C}test");  // true (curly quotes)
+```
+
+Respects `TextFixerConfig` — disabled fixers are skipped:
+
+```php
+$config = new TextFixerConfig(uncurlQuotes: false);
+Ftfy::needsFix("\u{201C}test", $config); // false
+```
+
 ### `Ftfy::fixAndExplain(string $text, ?TextFixerConfig $config = null): array`
 
 Returns `['text' => string, 'explanation' => array]` with the fixed text and a list of changes made.

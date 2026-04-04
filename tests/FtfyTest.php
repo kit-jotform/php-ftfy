@@ -268,4 +268,60 @@ class FtfyTest extends TestCase
         $result = Ftfy::fixText($input, $config);
         $this->assertSame($input, $result);
     }
+
+    // -------------------------------------------------------------------------
+    // needsFix (dry run)
+    // -------------------------------------------------------------------------
+
+    public function testNeedsFixFalseForCleanText(): void
+    {
+        $this->assertFalse(Ftfy::needsFix(''));
+        $this->assertFalse(Ftfy::needsFix('Hello world'));
+        $this->assertFalse(Ftfy::needsFix('Héllo wörld'));
+    }
+
+    public function testNeedsFixDetectsEachFixerTarget(): void
+    {
+        $this->assertTrue(Ftfy::needsFix("s\xC3\x83\xC2\xB3"));         // mojibake
+        $this->assertTrue(Ftfy::needsFix('&amp; test'));                  // HTML entity
+        $this->assertTrue(Ftfy::needsFix("\u{201C}test\u{201D}"));       // curly quotes
+        $this->assertTrue(Ftfy::needsFix("\u{FB01}x"));                  // ligature
+        $this->assertTrue(Ftfy::needsFix("ＬＯＵＤ"));                   // fullwidth
+        $this->assertTrue(Ftfy::needsFix("a\r\nb"));                     // CRLF
+        $this->assertTrue(Ftfy::needsFix("\033[31mred\033[0m"));         // terminal escape
+        $this->assertTrue(Ftfy::needsFix("hello\x01world"));            // control char
+        $this->assertTrue(Ftfy::needsFix("\xED\xA0\xBD\xED\xB2\xA9")); // CESU-8 surrogate
+    }
+
+    public function testNeedsFixRespectsConfig(): void
+    {
+        $config = new TextFixerConfig(uncurlQuotes: false);
+        $this->assertFalse(Ftfy::needsFix("\u{201C}test\u{201D}", $config));
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('needsFixSamplesProvider')]
+    public function testNeedsFixAgreesWithFixText(string $sample): void
+    {
+        $changed = Ftfy::fixText($sample) !== $sample;
+        $this->assertSame($changed, Ftfy::needsFix($sample), 'input: ' . json_encode($sample));
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function needsFixSamplesProvider(): iterable
+    {
+        return [
+            'ascii'      => ['Hello world'],
+            'mojibake'   => ["s\xC3\x83\xC2\xB3"],
+            'html'       => ['&amp; stuff'],
+            'curly'      => ["\u{201C}quoted\u{201D}"],
+            'ligature'   => ["\u{FB01}nger"],
+            'fullwidth'  => ["ＬＯＵＤ"],
+            'crlf'       => ["a\r\nb"],
+            'ansi'       => ["\033[36mblue\033[0m"],
+            'ctrl'       => ["test\x02end"],
+            'surrogate'  => ["\xED\xA0\xBD\xED\xB2\xA9"],
+            'clean_utf8' => ['Héllo wörld'],
+            'empty'      => [''],
+        ];
+    }
 }
