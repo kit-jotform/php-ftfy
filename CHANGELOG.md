@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-04-05
+
+### Changed
+- Set own version scheme (`1.1.1`) instead of mirroring Python ftfy version
+- Fix PHPCS PSR-12 violations across all source files
+- Add `squizlabs/php_codesniffer` as dev dependency
+
+## [1.1.0] - 2026-04-04
+
 ### Added
 - `Ftfy::needsFix()` fast dry-run method to check if text needs fixing without applying changes
 

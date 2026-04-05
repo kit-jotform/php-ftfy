@@ -1,6 +1,6 @@
 # php-ftfy: fixes text for you
 
-A PHP 8.1+ port of the [Python ftfy library](https://github.com/rspeer/python-ftfy) (version 6.3.1) by Robyn Speer.
+A PHP 8.1+ text-fixing library based on the [Python ftfy library](https://github.com/rspeer/python-ftfy) (version 6.3.1) by Robyn Speer.
 
 ```php
 use Ftfy\Ftfy;

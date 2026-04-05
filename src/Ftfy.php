@@ -7,10 +7,10 @@ namespace Ftfy;
 use Ftfy\Codecs\SloppyCodecs;
 use Ftfy\Codecs\Utf8Variants;
 
-/** Main entry point. Port of ftfy/__init__.py. */
+/** Main entry point. Based on Python ftfy 6.3.1. */
 final class Ftfy
 {
-    public const VERSION = '6.3.1-php';
+    public const VERSION = '1.1.1';
 
     /**
      * Fix Unicode problems in text, returning the corrected string.
@@ -36,6 +36,7 @@ final class Ftfy
             // maxDecodeLength is a character count; use mb_substr in the rare
             // case a segment might exceed it (worst-case 4 bytes per char).
             if (($textbreak - $pos) > $config->maxDecodeLength * 4) {
+                // phpcs:ignore Generic.Files.LineLength
                 $segment = mb_substr($text, mb_strlen(substr($text, 0, $pos), 'UTF-8'), $config->maxDecodeLength, 'UTF-8');
                 $pos += strlen($segment);
             } else {
@@ -199,7 +200,8 @@ final class Ftfy
 
         $config ??= new TextFixerConfig(explain: false);
 
-        if ($config->fixLineBreaks
+        if (
+            $config->fixLineBreaks
             && (str_contains($text, "\r")
                 || str_contains($text, "\u{2028}")
                 || str_contains($text, "\u{2029}")
@@ -212,7 +214,8 @@ final class Ftfy
             return true;
         }
 
-        if ($config->unescapeHtml !== false
+        if (
+            $config->unescapeHtml !== false
             && ($config->unescapeHtml !== 'auto' || !str_contains($text, '<'))
             && preg_match(CharData::HTML_ENTITY_RE, $text)
         ) {
@@ -233,13 +236,15 @@ final class Ftfy
             $charClasses[] = '\x{3000}\x{FF01}-\x{FFEF}';
         }
         if ($config->removeControlChars) {
+            // phpcs:ignore Generic.Files.LineLength
             $charClasses[] = '\x{0000}-\x{0008}\x{000B}\x{000E}-\x{001F}\x{007F}\x{206A}-\x{206F}\x{FEFF}\x{FFF9}-\x{FFFC}';
         }
         if ($charClasses !== [] && preg_match('/[' . implode('', $charClasses) . ']/u', $text)) {
             return true;
         }
 
-        if ($config->normalization !== null
+        if (
+            $config->normalization !== null
             && !\Normalizer::isNormalized($text, match ($config->normalization) {
                 'NFC'  => \Normalizer::FORM_C,
                 'NFD'  => \Normalizer::FORM_D,
@@ -252,7 +257,8 @@ final class Ftfy
         }
 
         if ($config->fixEncoding && !SloppyCodecs::possibleEncoding($text, 'ascii')) {
-            if (preg_match('/[\x{0080}-\x{009F}]|[\x{00C0}-\x{00DF}][\x{0080}-\x{00BF}]/u', $text)
+            if (
+                preg_match('/[\x{0080}-\x{009F}]|[\x{00C0}-\x{00DF}][\x{0080}-\x{00BF}]/u', $text)
                 && Badness::isBad($text)
             ) {
                 return true;
@@ -504,10 +510,15 @@ final class Ftfy
                 if ($i > $copyFrom) {
                     $chunks[] = substr($utf8, $copyFrom, $i - $copyFrom);
                 }
-                if (($b & 0xE0) === 0xC0) { $i += 2; }
-                elseif (($b & 0xF0) === 0xE0) { $i += 3; }
-                elseif (($b & 0xF8) === 0xF0) { $i += 4; }
-                else { $i++; }
+                if (($b & 0xE0) === 0xC0) {
+                    $i += 2;
+                } elseif (($b & 0xF0) === 0xE0) {
+                    $i += 3;
+                } elseif (($b & 0xF8) === 0xF0) {
+                    $i += 4;
+                } else {
+                    $i++;
+                }
                 $copyFrom = $i;
             }
             if ($copyFrom === 0) {

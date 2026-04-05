@@ -49,6 +49,7 @@ final class Utf8Variants
                     $chunks[] = substr($bytes, $copyFrom, $i - $copyFrom);
                 }
                 $high = (($b & 0x0F) << 12) | ((ord($bytes[$i + 1]) & 0x3F) << 6) | (ord($bytes[$i + 2]) & 0x3F);
+                // phpcs:ignore Generic.Files.LineLength
                 $low  = ((ord($bytes[$i + 3]) & 0x0F) << 12) | ((ord($bytes[$i + 4]) & 0x3F) << 6) | (ord($bytes[$i + 5]) & 0x3F);
                 $codepoint = 0x10000 + (($high - 0xD800) << 10) + ($low - 0xDC00);
                 $chunks[] = mb_chr($codepoint, 'UTF-8');

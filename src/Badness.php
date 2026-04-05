@@ -160,6 +160,7 @@ final class Badness
         $lc = self::LOWER_COMMON;
         $box = self::BOX;
 
+        // phpcs:disable Generic.Files.LineLength
         self::$pattern = '/
             [' . $c1 . ']
             |
@@ -236,6 +237,7 @@ final class Badness
             |
             \x{0101}\x{20AC}
         /ux';
+        // phpcs:enable Generic.Files.LineLength
 
         return self::$pattern;
     }
