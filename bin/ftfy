@@ -8,16 +8,18 @@ require __DIR__ . '/../vendor/autoload.php';
 use Ftfy\Ftfy;
 
 // Parse flags
-$explain = false;
-$file    = null;
-$args    = [];
+$explain   = false;
+$needsFix  = false;
+$file      = null;
+$args      = [];
 
 for ($i = 1; $i < $argc; $i++) {
     match ($argv[$i]) {
-        '--explain', '-e' => $explain = true,
-        '--file',   '-f'  => $file = $argv[++$i] ?? null,
-        '--help',   '-h'  => help(),
-        default           => $args[] = $argv[$i],
+        '--explain', '-e'    => $explain = true,
+        '--needs-fix', '-n' => $needsFix = true,
+        '--file',   '-f'     => $file = $argv[++$i] ?? null,
+        '--help',   '-h'     => help(),
+        default                => $args[] = $argv[$i],
     };
 }
 
@@ -34,6 +36,12 @@ if ($args) {
     $text = stream_get_contents(STDIN);
 } else {
     help();
+}
+
+if ($needsFix) {
+    $needs = Ftfy::needsFix($text);
+    echo ($needs ? 'true' : 'false') . "\n";
+    exit($needs ? 1 : 0);
 }
 
 if ($explain) {
@@ -58,9 +66,10 @@ function help(): never
       echo "text" | ftfy [options]
 
     Options:
-      -e, --explain   Print what was fixed (to stderr)
-      -f, --file      Read input from a file
-      -h, --help      Show this help
+      -e, --explain    Print what was fixed (to stderr)
+      -n, --needs-fix  Print true/false; exit 0 if no fix needed, 1 if Ftfy::needsFix is true
+      -f, --file       Read input from a file
+      -h, --help       Show this help
 
     HELP;
     exit(0);
