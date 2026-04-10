@@ -239,8 +239,31 @@ final class Ftfy
             // phpcs:ignore Generic.Files.LineLength
             $charClasses[] = '\x{0000}-\x{0008}\x{000B}\x{000E}-\x{001F}\x{007F}\x{206A}-\x{206F}\x{FEFF}\x{FFF9}-\x{FFFC}';
         }
-        if ($charClasses !== [] && preg_match('/[' . implode('', $charClasses) . ']/u', $text)) {
-            return true;
+        if ($charClasses !== []) {
+            $charClassPattern = '/[' . implode('', $charClasses) . ']/u';
+            $len = strlen($text);
+            if ($len > 8192) {
+                $chunkSize = 8192;
+                $overlap   = 16;
+                for ($offset = 0; $offset < $len; $offset += $chunkSize) {
+                    $chunk = substr($text, $offset, $chunkSize + $overlap);
+                    try {
+                        if (preg_match($charClassPattern, $chunk)) {
+                            return true;
+                        }
+                    } catch (\ValueError) {
+                        // skip chunk
+                    }
+                }
+            } else {
+                try {
+                    if (preg_match($charClassPattern, $text)) {
+                        return true;
+                    }
+                } catch (\ValueError) {
+                    // PCRE limit hit — continue to next checks
+                }
+            }
         }
 
         if (
@@ -257,10 +280,12 @@ final class Ftfy
         }
 
         if ($config->fixEncoding && !SloppyCodecs::possibleEncoding($text, 'ascii')) {
-            if (
-                preg_match('/[\x{0080}-\x{009F}]|[\x{00C0}-\x{00DF}][\x{0080}-\x{00BF}]/u', $text)
-                && Badness::isBad($text)
-            ) {
+            try {
+                $hasC1OrBadSeq = (bool) preg_match('/[\x{0080}-\x{009F}]|[\x{00C0}-\x{00DF}][\x{0080}-\x{00BF}]/u', $text);
+            } catch (\ValueError) {
+                $hasC1OrBadSeq = false;
+            }
+            if ($hasC1OrBadSeq && Badness::isBad($text)) {
                 return true;
             }
         }

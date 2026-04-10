@@ -242,14 +242,70 @@ final class Badness
         return self::$pattern;
     }
 
-    public static function badness(string $text): int
-    {
-        $count = preg_match_all(self::getPattern(), $text);
-        return $count === false ? 0 : $count;
-    }
-
     public static function isBad(string $text): bool
     {
-        return (bool) preg_match(self::getPattern(), $text);
+        if (strlen($text) > 8192) {
+            return self::isBadChunked($text);
+        }
+        try {
+            return (bool) preg_match(self::getPattern(), $text);
+        } catch (\ValueError) {
+            return self::isBadChunked($text);
+        }
+    }
+
+    /**
+     * Splits text into overlapping 8KB chunks and runs the pattern on each.
+     * Used proactively for large strings and as fallback when preg_match hits PCRE limits.
+     * Overlap of 16 bytes ensures multi-char sequences at chunk boundaries are not missed
+     * (longest pattern sequence is 4 chars × 4 UTF-8 bytes = 16 bytes).
+     */
+    private static function isBadChunked(string $text): bool
+    {
+        $chunkSize = 8192;
+        $overlap   = 16;
+        $len       = strlen($text);
+        for ($offset = 0; $offset < $len; $offset += $chunkSize) {
+            $chunk = substr($text, $offset, $chunkSize + $overlap);
+            try {
+                if (preg_match(self::getPattern(), $chunk)) {
+                    return true;
+                }
+            } catch (\ValueError) {
+                // chunk still too large — skip conservatively
+            }
+        }
+        return false;
+    }
+
+    public static function badness(string $text): int
+    {
+        if (strlen($text) > 8192) {
+            return self::badnessChunked($text);
+        }
+        try {
+            $count = preg_match_all(self::getPattern(), $text);
+            return $count === false ? 0 : $count;
+        } catch (\ValueError) {
+            return self::badnessChunked($text);
+        }
+    }
+
+    private static function badnessChunked(string $text): int
+    {
+        $chunkSize = 8192;
+        $overlap   = 16;
+        $len       = strlen($text);
+        $total     = 0;
+        for ($offset = 0; $offset < $len; $offset += $chunkSize) {
+            $chunk = substr($text, $offset, $chunkSize + $overlap);
+            try {
+                $count  = preg_match_all(self::getPattern(), $chunk);
+                $total += ($count === false ? 0 : $count);
+            } catch (\ValueError) {
+                // skip problematic chunk
+            }
+        }
+        return $total;
     }
 }
