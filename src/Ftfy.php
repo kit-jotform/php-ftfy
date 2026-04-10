@@ -10,7 +10,7 @@ use Ftfy\Codecs\Utf8Variants;
 /** Main entry point. Based on Python ftfy 6.3.1. */
 final class Ftfy
 {
-    public const VERSION = '1.1.1';
+    public const VERSION = '1.2.0';
 
     /**
      * Fix Unicode problems in text, returning the corrected string.

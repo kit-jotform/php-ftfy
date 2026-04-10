@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-10
+
+### Added
+- `Badness::isBad()` and `Badness::badness()` now split strings > 8 KB into
+  overlapping chunks before applying the PCRE pattern, preventing backtrack/
+  recursion limit errors on large inputs
+- `Ftfy::needsFix()` applies the same chunked strategy for its character-class
+  scan and wraps all `preg_match` calls in `ValueError` guards
+- `tests/BrokenTxtTest.php` — regression suite driven by `broken.txt` with
+  9 injected broken variants (mojibake, curly quotes, ligatures, fullwidth,
+  CRLF, ANSI escapes, C1 controls, HTML entities, CESU-8 surrogates)
+- `bench/benchmark.php` — performance comparison of `needsFix` vs `fixText`
+  on small and large inputs, with chunked vs chunkless `isBad` measurements
+
 ## [1.1.1] - 2026-04-05
 
 ### Changed
