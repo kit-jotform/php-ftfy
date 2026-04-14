@@ -108,21 +108,30 @@ use Ftfy\Ftfy;
 use Ftfy\TextFixerConfig;
 
 $config = new TextFixerConfig(
-    fixEntities: true,       // decode HTML entities
-    fixEncoding: true,       // fix mojibake
-    fixSurrogates: true,     // fix surrogate characters
-    fixLineBreaks: false,    // normalize line breaks
-    fixLatin: false,         // fix Latin-1 lookalikes
-    fixCharWidths: false,    // normalize character widths
-    uncurlQuotes: true,      // straighten curly quotes
-    removeTerminalEscapes: true,
-    maxDecodeLength: 1_000_000,
+    unescapeHtml: 'auto',           // 'auto', true, or false — decode HTML entities
+    removeTerminalEscapes: true,    // strip ANSI terminal escape sequences
+    fixEncoding: true,              // fix mojibake
+    restoreByteA0: true,            // restore byte 0xA0 as non-breaking space
+    replaceLossySequences: true,    // replace lossy codec sequences
+    decodeInconsistentUtf8: true,   // decode inconsistent UTF-8
+    fixC1Controls: true,            // fix C1 control characters
+    fixLatinLigatures: true,        // expand Latin ligatures (ﬁ → fi)
+    fixCharacterWidth: true,        // normalize fullwidth characters
+    uncurlQuotes: true,             // straighten curly quotes (' " → ' ")
+    fixLineBreaks: true,            // normalize line breaks to \n
+    fixSurrogates: true,            // fix surrogate characters
+    removeControlChars: true,       // remove control characters
+    normalization: 'NFC',           // Unicode normalization form (NFC, NFD, NFKC, NFKD, or null)
 );
 
 $fixed = Ftfy::fixText($garbled, $config);
 ```
 
-Use `$config->with(fixEntities: false)` to produce a modified copy.
+Use `$config->with(uncurlQuotes: false)` to produce a modified copy.
+
+> **Note on large inputs:** Internally, regex matching uses chunked processing for inputs
+> larger than 8 KB to avoid hitting PCRE backtracking/recursion limits. No configuration
+> is needed — this is handled automatically.
 
 ## Command-line usage
 
