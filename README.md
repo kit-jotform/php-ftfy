@@ -155,6 +155,15 @@ php bin/ftfy --explain "schÃ¶n"
 #   - decode: utf-8
 ```
 
+**Check if text needs fixing** (exit code 1 = needs fix):
+```bash
+php bin/ftfy --needs-fix "schÃ¶n"
+# true
+
+php bin/ftfy --needs-fix "schön"
+# false
+```
+
 **Install globally** (optional):
 ```bash
 ln -s "$(pwd)/bin/ftfy" /usr/local/bin/ftfy
@@ -166,6 +175,7 @@ ftfy "schÃ¶n"
 | Option | Short | Description |
 |---|---|---|
 | `--explain` | `-e` | Print what was fixed (to stderr) |
+| `--needs-fix` | `-n` | Print true/false; exit 0 if no fix needed, 1 if fix needed |
 | `--file` | `-f` | Read input from a file |
 | `--help` | `-h` | Show help |
 
