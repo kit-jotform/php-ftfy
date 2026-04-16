@@ -8,20 +8,47 @@ require __DIR__ . '/../vendor/autoload.php';
 use Ftfy\Ftfy;
 
 // Parse flags
-$explain   = false;
-$needsFix  = false;
-$file      = null;
-$args      = [];
+$explain      = false;
+$needsFix     = false;
+$file         = null;
+$configArgs   = [];
+$args         = [];
 
 for ($i = 1; $i < $argc; $i++) {
-    match ($argv[$i]) {
-        '--explain', '-e'    => $explain = true,
-        '--needs-fix', '-n' => $needsFix = true,
-        '--file',   '-f'     => $file = $argv[++$i] ?? null,
-        '--help',   '-h'     => help(),
-        default                => $args[] = $argv[$i],
-    };
+    switch ($argv[$i]) {
+        case '--explain':
+        case '-e':
+            $explain = true;
+            break;
+        case '--needs-fix':
+        case '-n':
+            $needsFix = true;
+            break;
+        case '--file':
+        case '-f':
+            $file = $argv[++$i] ?? null;
+            break;
+        case '--config':
+        case '-c':
+            $pair = $argv[++$i] ?? null;
+            if ($pair === null || !str_contains($pair, '=')) {
+                fwrite(STDERR, "ftfy: --config requires a key=value argument\n");
+                exit(1);
+            }
+            [$key, $val] = explode('=', $pair, 2);
+            $configArgs[$key] = $val;
+            break;
+        case '--help':
+        case '-h':
+            help();
+            break;
+        default:
+            $args[] = $argv[$i];
+    }
 }
+
+// Build config from --config overrides
+$config = buildConfig($configArgs);
 
 // Get input: argument > file > stdin
 if ($args) {
@@ -39,13 +66,13 @@ if ($args) {
 }
 
 if ($needsFix) {
-    $needs = Ftfy::needsFix($text);
+    $needs = Ftfy::needsFix($text, $config);
     echo ($needs ? 'true' : 'false') . "\n";
     exit($needs ? 1 : 0);
 }
 
 if ($explain) {
-    [$fixed, $plan] = Ftfy::fixAndExplain($text);
+    [$fixed, $plan] = Ftfy::fixAndExplain($text, $config);
     echo $fixed . "\n";
     if ($plan) {
         fwrite(STDERR, "\nexplanation:\n");
@@ -54,7 +81,7 @@ if ($explain) {
         }
     }
 } else {
-    echo Ftfy::fixText($text) . "\n";
+    echo Ftfy::fixText($text, $config) . "\n";
 }
 
 function help(): never
@@ -66,11 +93,63 @@ function help(): never
       echo "text" | ftfy [options]
 
     Options:
-      -e, --explain    Print what was fixed (to stderr)
-      -n, --needs-fix  Print true/false; exit 0 if no fix needed, 1 if Ftfy::needsFix is true
-      -f, --file       Read input from a file
-      -h, --help       Show this help
+      -e, --explain          Print what was fixed (to stderr)
+      -n, --needs-fix        Print true/false; exit 0 if no fix needed, 1 if fix needed
+      -f, --file             Read input from a file
+      -c, --config key=val   Set a TextFixerConfig option (repeatable)
+      -h, --help             Show this help
+
+    Config keys (bool options accept true/false/1/0):
+      uncurlQuotes, fixEncoding, fixLineBreaks, fixSurrogates,
+      removeControlChars, removeTerminalEscapes, restoreByteA0,
+      replaceLossySequences, decodeInconsistentUtf8, fixC1Controls,
+      fixLatinLigatures, fixCharacterWidth, unescapeHtml,
+      normalization, maxDecodeLength
+
+    Examples:
+      ftfy -c uncurlQuotes=false "input"
+      ftfy -c normalization=NFKC -c fixLineBreaks=false --file in.txt
 
     HELP;
     exit(0);
+}
+
+function buildConfig(array $configArgs): \Ftfy\TextFixerConfig
+{
+    $boolKeys = [
+        'removeTerminalEscapes', 'fixEncoding', 'restoreByteA0',
+        'replaceLossySequences', 'decodeInconsistentUtf8', 'fixC1Controls',
+        'fixLatinLigatures', 'fixCharacterWidth', 'uncurlQuotes',
+        'fixLineBreaks', 'fixSurrogates', 'removeControlChars',
+    ];
+
+    $overrides = [];
+    foreach ($configArgs as $key => $val) {
+        if (in_array($key, $boolKeys, true)) {
+            $overrides[$key] = filter_var($val, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($overrides[$key] === null) {
+                fwrite(STDERR, "ftfy: config '$key' expects a boolean value (true/false/1/0), got: $val\n");
+                exit(1);
+            }
+        } elseif ($key === 'unescapeHtml') {
+            if ($val === 'auto') {
+                $overrides[$key] = 'auto';
+            } else {
+                $overrides[$key] = filter_var($val, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                if ($overrides[$key] === null) {
+                    fwrite(STDERR, "ftfy: config 'unescapeHtml' expects auto/true/false/1/0, got: $val\n");
+                    exit(1);
+                }
+            }
+        } elseif ($key === 'normalization') {
+            $overrides[$key] = $val === 'null' ? null : $val;
+        } elseif ($key === 'maxDecodeLength') {
+            $overrides[$key] = (int) $val;
+        } else {
+            fwrite(STDERR, "ftfy: unknown config key: $key\n");
+            exit(1);
+        }
+    }
+
+    return (new \Ftfy\TextFixerConfig())->with(...$overrides);
 }

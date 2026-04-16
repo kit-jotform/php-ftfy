@@ -173,6 +173,12 @@ php bin/ftfy --needs-fix "schön"
 # false
 ```
 
+**Override config options** with `-c key=value` (repeatable):
+```bash
+php bin/ftfy -c uncurlQuotes=false "It\u2019s great"
+php bin/ftfy -c normalization=NFKC -c fixLineBreaks=false --file input.txt
+```
+
 **Install globally** (optional):
 ```bash
 ln -s "$(pwd)/bin/ftfy" /usr/local/bin/ftfy
@@ -186,7 +192,10 @@ ftfy "schÃ¶n"
 | `--explain` | `-e` | Print what was fixed (to stderr) |
 | `--needs-fix` | `-n` | Print true/false; exit 0 if no fix needed, 1 if fix needed |
 | `--file` | `-f` | Read input from a file |
+| `--config key=val` | `-c` | Set a `TextFixerConfig` option (repeatable) |
 | `--help` | `-h` | Show help |
+
+Boolean config keys accept `true`/`false`/`1`/`0`: `uncurlQuotes`, `fixEncoding`, `fixLineBreaks`, `fixSurrogates`, `removeControlChars`, `removeTerminalEscapes`, `restoreByteA0`, `replaceLossySequences`, `decodeInconsistentUtf8`, `fixC1Controls`, `fixLatinLigatures`, `fixCharacterWidth`. String keys: `unescapeHtml` (`auto`/`true`/`false`), `normalization` (`NFC`/`NFKC`/`null`), `maxDecodeLength` (integer).
 
 ## Running tests
 
