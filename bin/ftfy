@@ -10,6 +10,7 @@ use Ftfy\Ftfy;
 // Parse flags
 $explain      = false;
 $needsFix     = false;
+$jsonMode     = false;
 $file         = null;
 $configArgs   = [];
 $args         = [];
@@ -23,6 +24,10 @@ for ($i = 1; $i < $argc; $i++) {
         case '--needs-fix':
         case '-n':
             $needsFix = true;
+            break;
+        case '--json':
+        case '-j':
+            $jsonMode = true;
             break;
         case '--file':
         case '-f':
@@ -65,6 +70,27 @@ if ($args) {
     help();
 }
 
+if ($jsonMode) {
+    if ($needsFix) {
+        $needs = jsonNeedsFix($text, $config);
+        echo ($needs ? 'true' : 'false') . "\n";
+        exit($needs ? 1 : 0);
+    }
+    if ($explain) {
+        [$fixed, $plan] = fixJsonInPlace($text, $config, explain: true);
+        echo $fixed;
+        if ($plan) {
+            fwrite(STDERR, "\nexplanation:\n");
+            foreach ($plan as [$operation, $param]) {
+                fwrite(STDERR, "  - $operation: $param\n");
+            }
+        }
+        exit(0);
+    }
+    echo fixJsonInPlace($text, $config);
+    exit(0);
+}
+
 if ($needsFix) {
     $needs = Ftfy::needsFix($text, $config);
     echo ($needs ? 'true' : 'false') . "\n";
@@ -95,6 +121,7 @@ function help(): never
     Options:
       -e, --explain          Print what was fixed (to stderr)
       -n, --needs-fix        Print true/false; exit 0 if no fix needed, 1 if fix needed
+      -j, --json             Fix mojibake inside JSON string values (minimal-diff output)
       -f, --file             Read input from a file
       -c, --config key=val   Set a TextFixerConfig option (repeatable)
       -h, --help             Show this help
@@ -152,4 +179,158 @@ function buildConfig(array $configArgs): \Ftfy\TextFixerConfig
     }
 
     return (new \Ftfy\TextFixerConfig())->with(...$overrides);
+}
+
+/**
+ * Walk JSON byte-by-byte, fix mojibake inside string literals, and emit
+ * the original bytes verbatim everywhere else. No regex (avoids PCRE
+ * backtrack/recursion limits on large inputs). No json_decode round-trip
+ * on the whole document.
+ *
+ * Only strings containing \u00XX escapes (the byte range that produces
+ * Windows-1252 mojibake) are decoded and tested with Ftfy::needsFix; all
+ * other strings — and all non-string bytes — pass through unchanged.
+ *
+ * When $explain is true, returns [output, mergedPlan] where mergedPlan
+ * is the de-duplicated list of operations applied across all strings.
+ *
+ * @return string|array{0:string,1:list<array{0:string,1:mixed}>}
+ */
+function fixJsonInPlace(string $json, \Ftfy\TextFixerConfig $config, bool $explain = false): string|array
+{
+    $out = '';
+    $len = strlen($json);
+    $i = 0;
+    $mergedPlan = [];
+    $seenOps = [];
+
+    if ($explain) {
+        $config = $config->with(explain: true);
+    }
+
+    while ($i < $len) {
+        $ch = $json[$i];
+
+        if ($ch !== '"') {
+            $out .= $ch;
+            $i++;
+            continue;
+        }
+
+        // Found opening quote: scan to the matching close quote.
+        $start = $i;
+        $i++; // skip opening "
+        $hasLowUnicodeEscape = false;
+
+        while ($i < $len) {
+            $b = $json[$i];
+            if ($b === '\\') {
+                // Note a \u00XX escape: produces a byte in 0x00-0xFF, where
+                // 0x80-0xFF is where mojibake lives.
+                if (!$hasLowUnicodeEscape
+                    && $i + 3 < $len
+                    && $json[$i + 1] === 'u'
+                    && $json[$i + 2] === '0'
+                    && $json[$i + 3] === '0'
+                ) {
+                    $hasLowUnicodeEscape = true;
+                }
+                $i += 2; // skip backslash + next byte (covers \", \\, \uXXXX prefix)
+                continue;
+            }
+            if ($b === '"') {
+                $i++; // include closing "
+                break;
+            }
+            $i++;
+        }
+
+        $literal = substr($json, $start, $i - $start);
+
+        // Fast path: no \u00XX escape means no possible mojibake.
+        if (!$hasLowUnicodeEscape) {
+            $out .= $literal;
+            continue;
+        }
+
+        // Decode just this string's escapes via json_decode (no recursion).
+        $decoded = json_decode($literal);
+        if (!is_string($decoded) || !\Ftfy\Ftfy::needsFix($decoded, $config)) {
+            $out .= $literal;
+            continue;
+        }
+
+        if ($explain) {
+            [$fixed, $plan] = \Ftfy\Ftfy::fixAndExplain($decoded, $config);
+            foreach ($plan as $step) {
+                $key = $step[0] . "\0" . (is_scalar($step[1]) ? (string) $step[1] : '');
+                if (!isset($seenOps[$key])) {
+                    $seenOps[$key] = true;
+                    $mergedPlan[] = $step;
+                }
+            }
+        } else {
+            $fixed = \Ftfy\Ftfy::fixText($decoded, $config);
+        }
+
+        // Re-encode with the same flags used by the source: keep real Unicode
+        // characters (UNESCAPED_UNICODE) and keep slashes as-is.
+        $reencoded = json_encode($fixed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $out .= ($reencoded === false) ? $literal : $reencoded;
+    }
+
+    return $explain ? [$out, $mergedPlan] : $out;
+}
+
+/**
+ * Same scanner as fixJsonInPlace but short-circuits on the first string
+ * that needs fixing. O(prefix) instead of O(file).
+ */
+function jsonNeedsFix(string $json, \Ftfy\TextFixerConfig $config): bool
+{
+    $len = strlen($json);
+    $i = 0;
+
+    while ($i < $len) {
+        if ($json[$i] !== '"') {
+            $i++;
+            continue;
+        }
+
+        $start = $i;
+        $i++;
+        $hasLowUnicodeEscape = false;
+
+        while ($i < $len) {
+            $b = $json[$i];
+            if ($b === '\\') {
+                if (!$hasLowUnicodeEscape
+                    && $i + 3 < $len
+                    && $json[$i + 1] === 'u'
+                    && $json[$i + 2] === '0'
+                    && $json[$i + 3] === '0'
+                ) {
+                    $hasLowUnicodeEscape = true;
+                }
+                $i += 2;
+                continue;
+            }
+            if ($b === '"') {
+                $i++;
+                break;
+            }
+            $i++;
+        }
+
+        if (!$hasLowUnicodeEscape) {
+            continue;
+        }
+
+        $decoded = json_decode(substr($json, $start, $i - $start));
+        if (is_string($decoded) && \Ftfy\Ftfy::needsFix($decoded, $config)) {
+            return true;
+        }
+    }
+
+    return false;
 }

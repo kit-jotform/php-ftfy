@@ -179,6 +179,21 @@ php bin/ftfy -c uncurlQuotes=false "It\u2019s great"
 php bin/ftfy -c normalization=NFKC -c fixLineBreaks=false --file input.txt
 ```
 
+**Fix mojibake inside a JSON file** with `-j` (minimal-diff: only changes string values that contain mojibake; preserves whitespace, key order, and untouched escapes):
+
+```bash
+php bin/ftfy -j --file broken.json > fixed.json
+```
+
+When mojibake lives inside JSON string values, the raw file contains only ASCII escape sequences like `â€”`, so plain `php bin/ftfy --needs-fix broken.json` reports `false` — the mojibake bytes only appear *after* JSON decoding. `-j` walks the JSON byte-by-byte (no regex, no PCRE recursion limits), decodes each string literal individually, and rewrites only those that `needsFix` flags. Other strings and all structural bytes pass through verbatim.
+
+`-j` composes with `-n` and `-e`:
+
+```bash
+php bin/ftfy -j -n --file broken.json     # short-circuits at first bad string
+php bin/ftfy -j -e --file broken.json     # fix + de-duplicated explain plan on stderr
+```
+
 **Install globally** (optional):
 ```bash
 ln -s "$(pwd)/bin/ftfy" /usr/local/bin/ftfy
@@ -191,6 +206,7 @@ ftfy "schÃ¶n"
 |---|---|---|
 | `--explain` | `-e` | Print what was fixed (to stderr) |
 | `--needs-fix` | `-n` | Print true/false; exit 0 if no fix needed, 1 if fix needed |
+| `--json` | `-j` | Fix mojibake inside JSON string values (minimal-diff output; composes with `-n` and `-e`) |
 | `--file` | `-f` | Read input from a file |
 | `--config key=val` | `-c` | Set a `TextFixerConfig` option (repeatable) |
 | `--help` | `-h` | Show help |
