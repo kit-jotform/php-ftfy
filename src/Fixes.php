@@ -9,6 +9,7 @@ use Ftfy\Codecs\SloppyCodecs;
 /** Individual text-fixing functions. Port of ftfy/fixes.py. */
 final class Fixes
 {
+    /** Decode HTML entities (&amp;, &#x41;, &hellip;, etc.) to their Unicode equivalents. */
     public static function unescapeHtml(string $text): string
     {
         $entities = CharData::getHtmlEntities();
@@ -35,11 +36,13 @@ final class Fixes
         ) ?? $text;
     }
 
+    /** Strip ANSI/VT100 terminal escape sequences (e.g. colour codes). */
     public static function removeTerminalEscapes(string $text): string
     {
         return preg_replace('/\033\[((?:\d|;)*)([a-zA-Z])/', '', $text) ?? $text;
     }
 
+    /** Replace typographic (curly) quotes with straight ASCII equivalents. */
     public static function uncurlQuotes(string $text): string
     {
         $text = preg_replace(CharData::SINGLE_QUOTE_RE, "'", $text) ?? $text;
@@ -47,6 +50,7 @@ final class Fixes
         return $text;
     }
 
+    /** Expand Latin ligatures (ff, fi, fl …) and compatibility digraphs to their component letters. */
     public static function fixLatinLigatures(string $text): string
     {
         $ligatures = CharData::LIGATURES;
@@ -60,6 +64,7 @@ final class Fixes
         ) ?? $text;
     }
 
+    /** Normalize fullwidth/halfwidth Unicode variants (U+FF01–U+FFEF) and ideographic space (U+3000) to their standard-width equivalents. */
     public static function fixCharacterWidth(string $text): string
     {
         $widthMap = CharData::getWidthMap();
@@ -73,6 +78,7 @@ final class Fixes
         ) ?? $text;
     }
 
+    /** Normalize all line-break variants (CRLF, CR, U+2028, U+2029, U+0085) to LF. */
     public static function fixLineBreaks(string $text): string
     {
         // Normalize CRLF first so \r\n doesn't leave a stray \r.
@@ -84,6 +90,7 @@ final class Fixes
         );
     }
 
+    /** Decode CESU-8 surrogate pairs to proper UTF-8 and replace isolated surrogates with U+FFFD. */
     public static function fixSurrogates(string $text): string
     {
         // PCRE /u rejects surrogates, so decode CESU-8 at the byte level.
@@ -157,6 +164,7 @@ final class Fixes
         return implode('', $chunks);
     }
 
+    /** Remove C0/C1 control characters and invisible format characters from text. */
     public static function removeControlChars(string $text): string
     {
         $codepoints = CharData::CONTROL_CHAR_CODEPOINTS;
@@ -197,12 +205,16 @@ final class Fixes
         return $bytes;
     }
 
-    /** Replace LOSSY_UTF8_RE matches with U+FFFD (raw bytes in, raw bytes out). */
+    /**
+     * Replace incomplete UTF-8 sequences — where continuation bytes were substituted
+     * with 0x1A or '?' by a lossy codec — with U+FFFD. Operates on raw byte strings.
+     */
     public static function replaceLossySequences(string $bytes): string
     {
         return preg_replace(CharData::LOSSY_UTF8_RE, "\xEF\xBF\xBD", $bytes) ?? $bytes;
     }
 
+    /** Recursively re-decode mojibake sequences embedded within otherwise-correct UTF-8. */
     public static function decodeInconsistentUtf8(string $text): string
     {
         $detectorRegex = CharData::getUtf8DetectorRegex();
@@ -225,6 +237,7 @@ final class Fixes
     /** @var array<string,string>|null */
     private static ?array $c1Map = null;
 
+    /** Reinterpret C1 control characters (U+0080–U+009F) as Windows-1252 printable characters. */
     public static function fixC1Controls(string $text): string
     {
         if (self::$c1Map === null) {
@@ -238,6 +251,7 @@ final class Fixes
         return strtr($text, self::$c1Map);
     }
 
+    /** Strip leading byte-order marks (U+FEFF). */
     public static function removeBom(string $text): string
     {
         return ltrim($text, "\u{FEFF}");

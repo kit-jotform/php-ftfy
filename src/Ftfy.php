@@ -10,7 +10,7 @@ use Ftfy\Codecs\Utf8Variants;
 /** Main entry point. Based on Python ftfy 6.3.1. */
 final class Ftfy
 {
-    public const VERSION = '1.3.0';
+    public const VERSION = '1.3.1';
 
     /**
      * Fix Unicode problems in text, returning the corrected string.
@@ -160,6 +160,7 @@ final class Ftfy
         }
     }
 
+    /** Apply only encoding-fixing steps, looping until stable. Returns the corrected string. */
     public static function fixEncoding(string $text, ?TextFixerConfig $config = null): string
     {
         $config ??= new TextFixerConfig(explain: false);

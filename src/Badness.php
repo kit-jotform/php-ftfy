@@ -139,6 +139,7 @@ final class Badness
 
     private static ?string $pattern = null;
 
+    /** Return the compiled PCRE pattern used to detect mojibake sequences. */
     public static function getPattern(): string
     {
         if (self::$pattern !== null) {
@@ -242,6 +243,7 @@ final class Badness
         return self::$pattern;
     }
 
+    /** Return true if the text contains likely mojibake sequences. */
     public static function isBad(string $text): bool
     {
         if (strlen($text) > 8192) {
@@ -278,6 +280,7 @@ final class Badness
         return false;
     }
 
+    /** Count mojibake sequences in the text; higher means more likely to be mis-decoded. */
     public static function badness(string $text): int
     {
         if (strlen($text) > 8192) {

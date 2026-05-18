@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-05-19
+
+### Changed
+- `removeControlChars` now strips the undefined Windows-1252 C1 codepoints
+  (U+0081, U+008D, U+008F, U+0090, U+009D) along with the existing control
+  characters. These codepoints have no assigned character in any encoding
+  and `fixC1Controls` leaves them unchanged because there is nothing to
+  translate them to — they can only appear as mojibake leftovers.
+
+## [1.3.0] - 2026-05-19
+
+### Added
+- `--json`/`-j` CLI flag to fix mojibake inside JSON string literals
+  in-place without round-tripping the whole document through `json_decode`
+- `--config`/`-c` CLI flag to override individual `TextFixerConfig` options
+
+### Changed
+- `Ftfy::needsFix()` short-circuits the encoding check with a byte-level
+  prefilter: when the input contains neither `0xC2` nor `0xC3` lead bytes,
+  the expensive `Badness::isBad` regex is skipped entirely
+
 ## [1.2.0] - 2026-04-10
 
 ### Added

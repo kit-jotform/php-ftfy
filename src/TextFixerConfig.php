@@ -32,6 +32,7 @@ final class TextFixerConfig
     ) {
     }
 
+    /** Return a copy of this config with the given properties overridden. */
     public function with(mixed ...$overrides): self
     {
         return new self(
