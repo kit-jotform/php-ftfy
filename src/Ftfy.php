@@ -200,6 +200,16 @@ final class Ftfy
 
         $config ??= new TextFixerConfig(explain: false);
 
+        // U+0080–U+00FF mojibake encodes as C2/C3 lead bytes in UTF-8;
+        // skip the expensive regex when neither byte is present.
+        if (
+            $config->fixEncoding
+            && (str_contains($text, "\xC2") || str_contains($text, "\xC3"))
+            && Badness::isBad($text)
+        ) {
+            return true;
+        }
+
         if (
             $config->fixLineBreaks
             && (str_contains($text, "\r")
@@ -277,17 +287,6 @@ final class Ftfy
             })
         ) {
             return true;
-        }
-
-        if ($config->fixEncoding && !SloppyCodecs::possibleEncoding($text, 'ascii')) {
-            try {
-                $hasC1OrBadSeq = (bool) preg_match('/[\x{0080}-\x{009F}]|[\x{00C0}-\x{00DF}][\x{0080}-\x{00BF}]/u', $text);
-            } catch (\ValueError) {
-                $hasC1OrBadSeq = false;
-            }
-            if ($hasC1OrBadSeq && Badness::isBad($text)) {
-                return true;
-            }
         }
 
         return false;
